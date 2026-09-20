@@ -1,11 +1,19 @@
 # Bunker SEO Autopilot
 
-Multi-tenant SEO platform with AI — **Phase 1: Foundation**.
+Multi-tenant SEO platform with AI — **Phase 1 (Foundation) + Phase 2 (Website Intelligence)**.
 
-This phase builds the solid base: authentication, multi-tenant architecture, client &
-website management, activity logging, and backend-enforced tenant isolation. Later phases
-add research, keyword strategy, content generation, QA, publishing, analytics and the
-autopilot — the architecture is prepared for them but **none are implemented yet**.
+Phase 1 builds the solid base: authentication, multi-tenant architecture, client &
+website management, activity logging, and backend-enforced tenant isolation.
+
+Phase 2 adds a real website crawler: **Analyze Website** creates a crawl job that a
+standalone worker processes (sitemap discovery, robots.txt, URL discovery, page crawling,
+SEO extraction, deterministic issue engine), persisting pages, issues, an internal link
+graph, per-crawl snapshots and change detection into PocketBase. Dashboard tabs (SEO,
+Pages, Page Detail) surface the real, non-simulated results.
+
+Later phases layer research, keyword strategy, content generation, QA, publishing,
+analytics and the autopilot — the architecture is prepared for them but none of those
+are implemented yet.
 
 ## Stack
 
@@ -135,6 +143,97 @@ npm run test
 ## Build
 
 `npm run build` must pass clean (lint + typecheck + production build). See the Phase 1 report.
+
+## Phase 2 — Website Intelligence
+
+### Architecture
+
+```
+Next.js Dashboard ──create job──> PocketBase (crawl_jobs)
+                                        │ queried by
+                                        ▼
+                          Crawler Worker (crawler/, standalone process)
+                                        │  robots.txt · sitemap · BFS crawl · extraction
+                                        ▼
+                          PocketBase (website_pages, seo_issues, page_links,
+                                      website_snapshots, website_changes)
+                                        ▲
+                Dashboard reads (SEO tab, Pages tab, Page Detail)
+```
+
+The crawler is a **separate process** (`crawler/worker.js`) — it never runs inside a Vercel
+request. It authenticates to PocketBase as the **superuser** (admin creds live only in the
+worker's env, never in the frontend), claims queued jobs, and writes results. The dashboard
+only creates jobs and reads progress/results.
+
+### Running the worker locally
+
+```bash
+# deps
+cd crawler && npm install
+
+# one job, then exit (tests)
+PB_URL=http://127.0.0.1:8096 PB_ADMIN_EMAIL=... PB_ADMIN_PASSWORD=... \
+  ONE_SHOT=1 MAX_PAGES=500 CONCURRENCY=3 node worker.js
+
+# continuous polling
+PB_URL=... PB_ADMIN_EMAIL=... PB_ADMIN_PASSWORD=... node worker.js
+```
+
+Env: `PB_URL`, `PB_ADMIN_EMAIL`, `PB_ADMIN_PASSWORD`, `POLL_INTERVAL_MS` (3000),
+`MAX_PAGES` (500), `CONCURRENCY` (3).
+
+### Crawler safety
+
+SSRF protection is enforced **before every request and on every redirect hop**: only
+public IPs are ever connected to (private ranges, loopback, link-local including the
+cloud metadata endpoint, CGNAT, ULA/IPv6 loopback are blocked), DNS is resolved and
+checked, and an identifiable user-agent is sent. Request timeout, max redirects, max page
+size (2 MB), limited retries, concurrency cap and polite per-host delay are built in.
+`robots.txt` is honored for crawl restrictions and its `Sitemap:` references are used.
+
+### SEO issue engine (deterministic, no AI)
+
+Per-page: missing/very-short/very-long title, missing/duplicate/very-short meta
+description, missing/multiple H1, empty/thin content, missing alt text, invalid schema,
+noindex pages, 404/5xx/redirects, long redirect chains, canonical problems.
+Cross-page: duplicate titles & meta descriptions, broken internal links, potential orphan
+pages. Issues are **deduplicated** across crawls (open issues refresh `last_detected_at`;
+no-longer-present issues auto-resolve). Severities are `critical|high|medium|low|opportunity`.
+
+### New collections
+
+| Collection | Purpose |
+|---|---|
+| `crawl_jobs` | one analysis run: status lifecycle, page counts, error message |
+| `website_pages` | one crawled URL: SEO fields, indexability, content hash, depth |
+| `seo_issues` | deterministic issues with evidence + recommended action |
+| `website_snapshots` | per-crawl summary counts (pages, indexable, broken, issues by severity) |
+| `page_links` | internal link graph (source → destination, anchor, status) |
+| `website_changes` | change detection between crawls (new/removed/title/meta/status) |
+
+All six enforce **tenant isolation** in PocketBase access rules (`organization.*`).
+Users read only their own org's rows; the worker writes via admin. `website_pages`,
+`seo_issues`, `page_links`, `website_changes`, `website_snapshots` are write-restricted
+to the admin client.
+
+### New tests
+
+```bash
+npm run test          # Phase 1 (15) + Phase 2 tenant isolation + job lifecycle (7)
+npm run test:crawler  # crawler unit tests: normalization, sitemap, SSRF, extraction, issues (34)
+npm run test:seed     # seed test orgs/clients/websites
+```
+
+### Manual acceptance (end-to-end)
+
+1. Create a client + website.
+2. Open the website → **Analyze Website**. A crawl job is queued.
+3. The worker picks it up; the overview shows live progress (pages discovered/crawled/errors).
+4. On completion the **SEO** tab shows real issues with severity/category/page and filters;
+   **Pages** lists discovered URLs with status/title/indexability/words/H1/links/issues;
+   click a page for **Page Detail** (full SEO data + link graph).
+5. **Re-analyze** creates a new job (history preserved as snapshots).
 
 ## Deployment Notes
 

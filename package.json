@@ -8,7 +8,8 @@
       "start": "next start",
       "lint": "eslint",
       "typecheck": "tsc --noEmit",
-      "test": "node --test scripts/test.mjs",
+      "test": "node --test scripts/test.mjs && node --test scripts/test-phase2.mjs",
+      "test:crawler": "cd crawler && node --test \"test/*.test.js\"",
       "test:seed": "node scripts/seed-test.mjs",
       "pb:setup": "node scripts/setup-pocketbase.mjs"
     },
