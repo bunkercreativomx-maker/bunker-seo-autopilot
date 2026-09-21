@@ -46,7 +46,8 @@ function schema(maxItems) {
           required: ["keyword", "source_ids", "rationale"],
           properties: {
             keyword: { type: "string", minLength: 3, maxLength: 120 },
-            source_ids: { type: "array", minItems: 1, maxItems: 5, uniqueItems: true, items: { type: "string" } },
+            // OpenAI strict JSON Schema rejects uniqueItems; dedupe in code.
+            source_ids: { type: "array", minItems: 1, maxItems: 5, items: { type: "string" } },
             rationale: { type: "string", maxLength: 300 },
           },
         },
