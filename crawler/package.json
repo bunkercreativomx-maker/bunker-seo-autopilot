@@ -1,0 +1,19 @@
+{
+  "name": "bunker-seo-crawler",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Bunker SEO Autopilot — standalone website crawler worker.",
+  "scripts": {
+    "start": "node worker.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "fast-xml-parser": "^4.5.0",
+    "pocketbase": "^0.28.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
