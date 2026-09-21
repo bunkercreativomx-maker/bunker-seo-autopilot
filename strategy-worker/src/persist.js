@@ -15,6 +15,7 @@ function preservePayload(payload, previous) {
 const tenant = (ctx, versionId, now) => ({ organization: ctx.organization.id, client: ctx.client.id, website: ctx.website.id, strategy_version: versionId, created_at: now, updated_at: now });
 
 function keywordSource(record) {
+  if (record.source_types.includes("manual")) return "manual";
   if (record.source_types.includes("ai_discovery")) return "ai_discovery";
   if (record.source_types.includes("business_combination")) return "locations";
   if (record.source_types.includes("client") || record.source_types.includes("business_fact")) return "services";

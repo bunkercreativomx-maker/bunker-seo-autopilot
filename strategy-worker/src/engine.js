@@ -117,11 +117,17 @@ export function buildStrategy(input) {
   const facts = input?.facts || [];
   const factServices = facts.filter((fact) => fact.fact_type === "service" || fact.fact_type === "product").flatMap((fact) => splitBusinessValues(fact.value));
   const services = [...new Map([...splitBusinessValues(client.services), ...splitBusinessValues(client.products), ...factServices].map((value) => [normalizeKeyword(value), value])).values()];
+  // Country is a market/geo field, never a service area. Treating it as a
+  // location produced junk local keywords (for example "… systems mx").
+  const countryTokens = new Set([
+    ...[client.country, website.country].flatMap((value) => splitBusinessValues(value)),
+  ].map(normalizeKeyword).filter(Boolean));
   const locations = [...new Set([
     ...splitBusinessValues(client.primary_location), ...splitBusinessValues(client.service_areas),
-    ...splitBusinessValues(website.target_locations), ...splitBusinessValues(website.country),
+    ...splitBusinessValues(website.target_locations),
     ...facts.filter((fact) => fact.fact_type === "location" || fact.fact_type === "service_area").flatMap((fact) => splitBusinessValues(fact.value)),
-  ].map(normalizeKeyword).filter(Boolean))];
+  ].map(normalizeKeyword).filter(Boolean))]
+    .filter((location) => !countryTokens.has(location) && !/^[a-z]{2}$/.test(location));
   const candidates = new Map();
   const limits = {
     maxKeywords: Math.max(1, Number(input?.limits?.maxKeywords ?? 200)),
@@ -176,6 +182,39 @@ export function buildStrategy(input) {
     .slice(0, limits.maxKeywords);
 
   keywords = mergeGeneratedRecords(keywords, input?.existing?.keywords);
+
+  // A human decision must not silently disappear just because the generator no
+  // longer produces that phrase (for example when AI discovery is turned off on
+  // a regeneration). Approved/manually reviewed keywords are carried forward.
+  const generatedKeys = new Set(keywords.map((item) => item.key));
+  const carriedForward = (input?.existing?.keywords || [])
+    .filter((prior) => prior.manual_override && prior.key && !generatedKeys.has(prior.key))
+    .map((prior) => {
+      const label = prior.topic || prior.keyword;
+      const importance = prior.priority === "critical" ? 90 : prior.priority === "high" ? 70 : prior.priority === "medium" ? 50 : 30;
+      return {
+        id: stableId("kw", prior.key), key: prior.key,
+        keyword: prior.keyword, normalized_keyword: prior.normalized_keyword,
+        sources: [{ type: "manual", id: prior.id, field: "manual_override", value: prior.keyword }],
+        source_types: ["manual"], business_relevant: true,
+        intent: prior.intent || "mixed", page_type: prior.recommended_page_type || "other",
+        cluster_key: keywordKey(label), cluster: label,
+        existing_page_id: null, existing_page_url: null,
+        mapping_score: null, mapping_threshold: null, competing_page_ids: [],
+        search_volume: null, keyword_difficulty: null, cpc: null, metrics_source: null,
+        priority: prior.priority || null, status: prior.status || "approved",
+        priority_score: importance,
+        priority_breakdown: { score: importance, components: {}, reasons: ["MANUAL_KEYWORD_CARRIED_FORWARD"] },
+        manual_override: true, manual_fields: prior.manual_fields || [],
+        overridden_by: prior.overridden_by || null, overridden_at: prior.overridden_at || null,
+      };
+    })
+    .filter((item) => !keywords.some((existing) => existing.normalized_keyword === item.normalized_keyword));
+  if (carriedForward.length) {
+    keywords = [...keywords, ...carriedForward]
+      .sort((a, b) => b.priority_score - a.priority_score || a.normalized_keyword.localeCompare(b.normalized_keyword))
+      .slice(0, limits.maxKeywords + carriedForward.length);
+  }
 
   const groupedKeywords = new Map();
   for (const keyword of keywords) {
