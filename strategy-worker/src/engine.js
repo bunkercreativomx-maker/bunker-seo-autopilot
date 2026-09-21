@@ -170,7 +170,8 @@ export function buildStrategy(input) {
     return {
       ...candidate,
       sources: candidate.sources.map((source) => Object.fromEntries(Object.entries(source).filter(([field]) => field !== "key"))),
-      intent: classifyIntent(candidate.keyword), page_type: inferPageType(candidate.keyword, mapped || {}),
+      intent: classifyIntent(candidate.keyword, { locations, brand: client.business_name, isService: candidate.business_relevant }),
+      page_type: inferPageType(candidate.keyword, mapped || {}, { locations, brand: client.business_name, isService: candidate.business_relevant }),
       cluster_key: keywordKey(cluster), cluster,
       existing_page_id: mapped?.id || null, existing_page_url: mapped?.url || null,
       mapping_score: matches[0]?.score ?? null, mapping_threshold: minimumMappingScore,
@@ -278,7 +279,7 @@ export function buildStrategy(input) {
   const boundedInternalLinks = internalLinks.slice(0, Math.max(0, limits.maxOpportunities - boundedGaps.length));
 
   const generatedActions = [
-    ...boundedGaps.map((gap) => ({ key: `gap:${gap.key}`, type: "content_gap", title: `Create or improve a ${gap.gap_type.replace("_", " ")} page for “${gap.keyword}”`, entity_id: gap.id, priority_score: gap.priority_score, priority_breakdown: gap.priority_breakdown })),
+    ...boundedGaps.map((gap) => ({ key: `gap:${gap.key}`, type: "content_gap", title: `Create or improve a ${gap.gap_type.replace("_", " ")} page for “${gap.keyword}”`, entity_id: gap.id, page_type: gap.gap_type === "service_location" ? "location_page" : "service_page", priority_score: gap.priority_score, priority_breakdown: gap.priority_breakdown })),
     ...cannibalization.map((item) => ({ key: `cannibalization:${item.key}`, type: "cannibalization", title: `Resolve competing pages for “${item.keyword}”`, entity_id: item.id, priority_score: item.priority_score, priority_breakdown: item.priority_breakdown })),
     ...boundedInternalLinks.map((item) => {
       const priority = calculatePriority({ sourceCount: 2, businessRelevant: true, hasPage: true });
