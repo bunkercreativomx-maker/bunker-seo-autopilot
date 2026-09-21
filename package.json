@@ -8,8 +8,11 @@
       "start": "next start",
       "lint": "eslint",
       "typecheck": "tsc --noEmit",
-      "test": "node --test scripts/test.mjs && node --test scripts/test-phase2.mjs",
+      "test": "node --test scripts/test.mjs && node --test scripts/test-phase2.mjs && node --test scripts/test-phase3.mjs && npm run test:strategy-worker",
       "test:crawler": "cd crawler && node --test \"test/*.test.js\"",
+      "test:phase3": "node --test scripts/test-phase3.mjs",
+      "test:strategy-worker": "cd strategy-worker && node --test \"test/*.test.js\"",
+      "test:strategy-e2e": "node scripts/strategy-worker-e2e.mjs",
       "test:seed": "node scripts/seed-test.mjs",
       "pb:setup": "node scripts/setup-pocketbase.mjs"
     },

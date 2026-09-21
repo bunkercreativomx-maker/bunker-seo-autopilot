@@ -247,6 +247,157 @@ export interface WebsiteChange {
 
 export type WebsiteHealth = "healthy" | "needs_attention" | "critical" | "not_analyzed";
 
+// ---------- Phase 3: SEO Strategy ----------
+
+export type StrategyJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type StrategyRecordStatus = "discovered" | "draft" | "open" | "proposed" | "planned" | "reviewed" | "approved" | "targeted" | "ignored" | "resolved" | "archived" | "skipped" | "in_progress" | "completed";
+export type SearchIntent = "informational" | "navigational" | "commercial" | "transactional" | "local" | "mixed";
+export type StrategyPriority = "critical" | "high" | "medium" | "low";
+export type PlanHorizon = "30" | "60" | "90";
+export type PlanItemStatus = "planned" | "approved" | "in_progress" | "completed" | "skipped";
+
+interface StrategyRecordBase {
+  id: string;
+  organization: string;
+  client: string;
+  website: string;
+  strategy_version?: string;
+  manual_override?: boolean;
+  manual_fields?: string[];
+  overridden_by?: string;
+  overridden_at?: string;
+  created: string;
+  updated: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface StrategyJob extends Omit<StrategyRecordBase, "strategy_version"> {
+  status: StrategyJobStatus;
+  step?: string;
+  progress?: number;
+  error?: string;
+  triggered_by?: string;
+  configuration?: Record<string, unknown>;
+  started_at?: string;
+  completed_at?: string;
+}
+
+export interface StrategyVersion extends Omit<StrategyRecordBase, "strategy_version"> {
+  strategy_job?: string;
+  version: number;
+  summary?: string;
+  generated_at: string;
+  generated_by?: string;
+  configuration?: Record<string, unknown>;
+}
+
+export interface StrategyKeyword extends StrategyRecordBase {
+  keyword: string;
+  normalized_keyword?: string;
+  language?: string;
+  country?: string;
+  target_location?: string;
+  intent?: SearchIntent | string;
+  intent_confidence?: number | null;
+  funnel_stage?: string;
+  topic?: string;
+  source?: string;
+  source_query?: string;
+  existing_target_page?: string;
+  recommended_target_page?: string;
+  cluster?: string;
+  opportunity_type?: string;
+  recommended_page_type?: string;
+  priority?: StrategyPriority | string;
+  status?: StrategyRecordStatus;
+  search_volume?: number | null;
+  keyword_difficulty?: number | null;
+  cpc?: number | null;
+  metrics_source?: string;
+  confidence?: number | null;
+  evidence?: unknown;
+  expand?: { cluster?: TopicCluster };
+}
+
+export interface TopicCluster extends StrategyRecordBase {
+  name: string;
+  description?: string;
+  primary_topic?: string;
+  pillar_keyword?: string;
+  pillar_page?: string;
+  status?: StrategyRecordStatus;
+  confidence?: number | null;
+  evidence?: unknown;
+  keyword_count?: number | null;
+  intent?: SearchIntent | string;
+  expand?: { pillar_keyword?: StrategyKeyword; pillar_page?: WebsitePage };
+}
+
+export interface ContentOpportunity extends StrategyRecordBase {
+  keyword?: string;
+  cluster?: string;
+  opportunity_type?: string;
+  recommended_page_type?: string;
+  existing_page?: string;
+  recommended_url?: string;
+  title_suggestion?: string;
+  reason?: string;
+  priority?: StrategyPriority | string;
+  status?: StrategyRecordStatus;
+  evidence?: unknown;
+  confidence?: number | null;
+  expand?: { keyword?: StrategyKeyword; cluster?: TopicCluster; existing_page?: WebsitePage };
+}
+
+export interface CannibalizationIssue extends StrategyRecordBase {
+  keyword_group: string;
+  pages?: string[];
+  reason?: string;
+  severity?: StrategyPriority | string;
+  recommended_action?: string;
+  status?: StrategyRecordStatus;
+  confidence?: number | null;
+  evidence?: unknown;
+  expand?: { pages?: WebsitePage[] };
+}
+
+export interface InternalLinkOpportunity extends ContentOpportunity {
+  source_page?: string;
+  source_url?: string;
+  target_page?: string;
+  target_url?: string;
+  anchor_text?: string;
+}
+
+export interface StrategyPlanItem extends StrategyRecordBase {
+  plan?: string;
+  opportunity?: string;
+  keyword?: string;
+  cluster?: string;
+  action?: string;
+  page_type?: string;
+  existing_page?: string;
+  proposed_url?: string;
+  proposed_title?: string;
+  priority?: StrategyPriority | string;
+  scheduled_period?: string;
+  status?: PlanItemStatus;
+  reason?: string;
+  evidence?: unknown;
+  expand?: { keyword?: StrategyKeyword; cluster?: TopicCluster; existing_page?: WebsitePage; opportunity?: ContentOpportunity };
+}
+
+export interface StrategyData {
+  latestJob: StrategyJob | null;
+  keywords: StrategyKeyword[];
+  clusters: TopicCluster[];
+  opportunities: ContentOpportunity[];
+  cannibalization: CannibalizationIssue[];
+  internalLinks: InternalLinkOpportunity[];
+  plan: StrategyPlanItem[];
+}
+
 export const PLATFORMS: WebsitePlatform[] = ["nextjs", "react", "wordpress", "custom", "other"];
 export const CRAWL_STATUSES: CrawlStatus[] = ["queued", "running", "completed", "completed_with_errors", "failed", "cancelled"];
 export const ISSUE_SEVERITIES: IssueSeverity[] = ["critical", "high", "medium", "low", "opportunity"];
