@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/pocketbase/auth";
 import { getWebsite } from "@/lib/pocketbase/websites";
-import { getLatestSnapshot, listIssues, countOpenIssuesBySeverity } from "@/lib/pocketbase/analysis";
+import { getLatestSnapshot, listIssues } from "@/lib/pocketbase/analysis";
 import { Card, CardHeader, CardBody, EmptyState } from "@/components/ui";
 import { AnalyzeButton } from "@/components/analyze-button";
 import { IssuesTable } from "@/components/issues-table";
@@ -21,15 +21,29 @@ export default async function WebsiteSeoPage({
   const website = await getWebsite(pb, id);
   if (!website) return null;
 
-  const [snapshot, counts, issues] = await Promise.all([
+  // PocketBase auto-cancels identical concurrent SDK requests. Fetch the open
+  // issue set once, then only make a second (sequential) request when filters
+  // require a different result set.
+  const [snapshot, openIssues] = await Promise.all([
     getLatestSnapshot(pb, website.id),
-    countOpenIssuesBySeverity(pb, website.id),
-    listIssues(pb, website.id, {
-      severity: sp.severity,
-      status: sp.status ?? "open",
-      q: sp.q,
-    }),
+    listIssues(pb, website.id, { status: "open" }),
   ]);
+  const hasCustomFilters = Boolean(
+    sp.severity || sp.category || sp.q || (sp.status && sp.status !== "open")
+  );
+  const issues = hasCustomFilters
+    ? await listIssues(pb, website.id, {
+        severity: sp.severity,
+        category: sp.category,
+        status: sp.status ?? "open",
+        q: sp.q,
+      })
+    : openIssues;
+  const counts = { critical: 0, high: 0, medium: 0, low: 0, opportunity: 0, total: 0 };
+  for (const issue of openIssues) {
+    if (issue.severity in counts) counts[issue.severity]++;
+    counts.total++;
+  }
 
   if (!snapshot) {
     return (
