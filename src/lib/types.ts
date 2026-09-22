@@ -398,6 +398,78 @@ export interface StrategyData {
   plan: StrategyPlanItem[];
 }
 
+export type FactProvenance =
+  | "user_provided" | "website" | "crawler" | "manual" | "external_source" | "ai_inferred" | "unknown";
+export type VerificationState = "unverified" | "verified" | "ai_inferred" | "user_confirmed" | "unknown";
+
+export interface BusinessFact extends StrategyRecordBase {
+  fact_type: string;
+  label: string;
+  value: string;
+  source?: string;
+  source_url?: string;
+  verified?: boolean;
+  provenance?: FactProvenance;
+  verification_state?: VerificationState;
+  verified_by?: string;
+  verified_at?: string;
+}
+
+// Human-readable labels for internal page-type enums. Internal enum values stay
+// stable (no migration); only the UI label changes.
+export const PAGE_TYPE_LABELS: Record<string, string> = {
+  service_page: "Service Page",
+  location_page: "Location Page",
+  blog_article: "Blog Article",
+  comparison: "Comparison Page",
+  guide: "Guide",
+  faq: "FAQ Page",
+  product_page: "Product Page",
+  category_page: "Category Page",
+  homepage: "Homepage",
+  existing_page: "Existing Page Optimization",
+  technical: "Technical Fix",
+  other: "Other",
+  service: "Service Page",
+  location: "Location Page",
+  article: "Blog Article",
+  product: "Product Page",
+  utility: "Utility Page",
+};
+
+export const OPPORTUNITY_LABELS: Record<string, string> = {
+  create: "Create New Page",
+  optimize: "Optimize Existing Page",
+  expand: "Expand Existing Page",
+  merge: "Merge Pages",
+  internal_link: "Add Internal Link",
+  location: "Create Location Page",
+  service: "Create Service Page",
+  refresh: "Refresh / Optimize",
+  ignore: "Ignore",
+};
+
+export const INTENT_LABELS: Record<string, string> = {
+  informational: "Informational",
+  commercial: "Commercial",
+  transactional: "Transactional",
+  navigational: "Navigational",
+  local: "Local",
+  mixed: "Mixed",
+};
+
+export function pageTypeLabel(value?: string | null): string {
+  return (value && PAGE_TYPE_LABELS[value]) || value || "Other";
+}
+
+export function opportunityLabel(value?: string | null): string {
+  return (value && OPPORTUNITY_LABELS[value]) || value || "Other";
+}
+
+export function intentLabel(value?: string | null): string {
+  return (value && INTENT_LABELS[value]) || value || "Unknown";
+}
+
 export const PLATFORMS: WebsitePlatform[] = ["nextjs", "react", "wordpress", "custom", "other"];
 export const CRAWL_STATUSES: CrawlStatus[] = ["queued", "running", "completed", "completed_with_errors", "failed", "cancelled"];
 export const ISSUE_SEVERITIES: IssueSeverity[] = ["critical", "high", "medium", "low", "opportunity"];

@@ -1,9 +1,11 @@
 import { classifyIntent, inferPageType } from "./classify.js";
-import { calculatePriority, planHorizon } from "./priority.js";
+import { calculatePriority, scheduleAction } from "./priority.js";
+import { isVerified } from "./provenance.js";
 import { keywordKey, normalizeKeyword, overlapScore, pagePhrases, safeText, splitBusinessValues } from "./normalize.js";
 
 const SEVERITY_RANK = { critical: 5, high: 4, medium: 3, low: 2, opportunity: 1 };
 const MANUAL_FIELDS = ["keyword", "intent", "page_type", "target_page", "cluster", "priority", "status", "notes", "assignee", "due_date"];
+const GAP_TYPE_LABEL = { service: "Service Page", service_location: "Local Service Page" };
 
 function stableId(prefix, value) {
   let hash = 2166136261;
@@ -115,7 +117,11 @@ export function buildStrategy(input) {
   const links = input?.links || [];
   const issues = input?.issues || [];
   const facts = input?.facts || [];
-  const factServices = facts.filter((fact) => fact.fact_type === "service" || fact.fact_type === "product").flatMap((fact) => splitBusinessValues(fact.value));
+  // Only VERIFIED business facts are authoritative. AI-inferred or unverified
+  // facts must never silently become business truth (Phase 4 must not convert
+  // AI assumptions into factual claims).
+  const verifiedFacts = facts.filter((fact) => isVerified(fact));
+  const factServices = verifiedFacts.filter((fact) => fact.fact_type === "service" || fact.fact_type === "product").flatMap((fact) => splitBusinessValues(fact.value));
   const services = [...new Map([...splitBusinessValues(client.services), ...splitBusinessValues(client.products), ...factServices].map((value) => [normalizeKeyword(value), value])).values()];
   // Country is a market/geo field, never a service area. Treating it as a
   // location produced junk local keywords (for example "… systems mx").
@@ -125,7 +131,7 @@ export function buildStrategy(input) {
   const locations = [...new Set([
     ...splitBusinessValues(client.primary_location), ...splitBusinessValues(client.service_areas),
     ...splitBusinessValues(website.target_locations),
-    ...facts.filter((fact) => fact.fact_type === "location" || fact.fact_type === "service_area").flatMap((fact) => splitBusinessValues(fact.value)),
+    ...verifiedFacts.filter((fact) => fact.fact_type === "location" || fact.fact_type === "service_area").flatMap((fact) => splitBusinessValues(fact.value)),
   ].map(normalizeKeyword).filter(Boolean))]
     .filter((location) => !countryTokens.has(location) && !/^[a-z]{2}$/.test(location));
   const candidates = new Map();
@@ -136,7 +142,7 @@ export function buildStrategy(input) {
   };
 
   for (const service of services) addCandidate(candidates, service, sourceRef("client", client, client.services?.includes?.(service) ? "services" : "products"), { businessRelevant: true });
-  for (const fact of facts.filter((item) => item.fact_type === "service" || item.fact_type === "product")) {
+  for (const fact of verifiedFacts.filter((item) => item.fact_type === "service" || item.fact_type === "product")) {
     for (const value of splitBusinessValues(fact.value)) addCandidate(candidates, value, sourceRef("business_fact", fact, "value"), { businessRelevant: true });
   }
   for (const page of pages) {
@@ -279,13 +285,13 @@ export function buildStrategy(input) {
   const boundedInternalLinks = internalLinks.slice(0, Math.max(0, limits.maxOpportunities - boundedGaps.length));
 
   const generatedActions = [
-    ...boundedGaps.map((gap) => ({ key: `gap:${gap.key}`, type: "content_gap", title: `Create or improve a ${gap.gap_type.replace("_", " ")} page for “${gap.keyword}”`, entity_id: gap.id, page_type: gap.gap_type === "service_location" ? "location_page" : "service_page", priority_score: gap.priority_score, priority_breakdown: gap.priority_breakdown })),
+    ...boundedGaps.map((gap) => ({ key: `gap:${gap.key}`, type: "content_gap", title: `Create or improve a ${GAP_TYPE_LABEL[gap.gap_type] || "page"} for “${gap.keyword}”`, entity_id: gap.id, page_type: gap.gap_type === "service_location" ? "location_page" : "service_page", priority_score: gap.priority_score, priority_breakdown: gap.priority_breakdown })),
     ...cannibalization.map((item) => ({ key: `cannibalization:${item.key}`, type: "cannibalization", title: `Resolve competing pages for “${item.keyword}”`, entity_id: item.id, priority_score: item.priority_score, priority_breakdown: item.priority_breakdown })),
     ...boundedInternalLinks.map((item) => {
       const priority = calculatePriority({ sourceCount: 2, businessRelevant: true, hasPage: true });
       return { key: `internal-link:${item.key}`, type: "internal_link", title: `Link ${item.source_url} to ${item.destination_url}`, entity_id: item.id, priority_score: priority.score, priority_breakdown: priority };
     }),
-  ].map((action) => ({ ...action, id: stableId("action", action.key), horizon_days: planHorizon(action.priority_score, action.type) }))
+  ].map((action) => ({ ...action, id: stableId("action", action.key), horizon_days: scheduleAction({ priority: action.priority_score, type: action.type, pageType: action.page_type }) }))
     .sort((a, b) => a.horizon_days - b.horizon_days || b.priority_score - a.priority_score || a.key.localeCompare(b.key));
   const actions = mergeGeneratedRecords(generatedActions, input?.existing?.actions);
 
@@ -298,6 +304,15 @@ export function buildStrategy(input) {
       page_count: pages.length, link_count: links.length, issue_count: issues.length,
       inputs: ["clients", "websites", "business_facts", "website_pages", "page_links", "seo_issues"],
       fabricated_metrics: false, ai_provider: input?.ai?.provider || "null", ai_calls: Number(input?.ai?.calls) || 0,
+      // Only verified business facts are treated as authoritative; AI-inferred
+      // and unverified facts are never promoted to business truth.
+      verified_facts_only: true,
+      fact_provenance: {
+        total: facts.length,
+        verified: verifiedFacts.length,
+        unverified: facts.length - verifiedFacts.length,
+        ai_inferred: facts.filter((fact) => fact.provenance === "ai_inferred" || fact.verification_state === "ai_inferred").length,
+      },
     },
     keywords,
     clusters: mergeGeneratedRecords(clusters, input?.existing?.clusters),

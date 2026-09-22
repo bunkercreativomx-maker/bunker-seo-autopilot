@@ -145,7 +145,9 @@ export async function recordAIUsage(pb, usage, context, collections = DEFAULT_CO
     organization: context.organization.id, client: context.client.id, website: context.website.id,
     job: context.job?.id || undefined, strategy_version: context.strategyVersionId || context.savedVersionId || undefined,
     task: usage.task || "keyword_discovery", provider: usage.provider, model: usage.model || "unknown",
-    input_tokens: usage.inputTokens || 0, output_tokens: usage.outputTokens || 0, estimated_cost: usage.estimatedCost || 0,
+    input_tokens: usage.inputTokens || 0, output_tokens: usage.outputTokens || 0,
+    // Cost is null until model pricing is configured; never fabricate a price.
+    estimated_cost: usage.estimatedCost ?? null,
     timestamp: now, created_at: now, updated_at: now,
   });
 }

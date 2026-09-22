@@ -13,8 +13,44 @@ export function calculatePriority({ sourceCount = 0, businessRelevant = false, i
   };
 }
 
+// 30/60/90 scheduling is a SEPARATE concern from priority. Priority says how
+// important an item is; scheduling decides WHEN it should happen. The horizon
+// is driven primarily by content type and logical SEO sequence, with priority
+// only breaking ties within a type. This keeps a valid strategy from dumping
+// every high-priority opportunity into days 1-30 and leaving 61-90 empty.
+//
+//   Days 1-30  : technical fixes, cannibalization, primary commercial/service pages, critical optimization
+//   Days 31-60 : secondary services, strategic location pages, commercial supporting content, internal linking
+//   Days 61-90 : supporting informational content, cluster expansion, refresh/optimization, secondary opportunities
+export function scheduleAction({ priority = 0, type = "", pageType = "", intent = "", isRefresh = false } = {}) {
+  const p = Number(priority) || 0;
+  const pt = String(pageType || "").toLowerCase();
+  const t = String(type || "").toLowerCase();
+
+  // Technical conflicts and cannibalization are immediate.
+  if (t === "cannibalization" || t === "technical") return 30;
+
+  // Internal linking happens after the primary pages exist.
+  if (t === "internal_link") return 60;
+
+  // Content creation/optimization is scheduled by content type.
+  if (t === "content_gap" || t === "create" || t === "location" || t === "service" || t === "optimize" || t === "expand" || t === "refresh") {
+    // Strategic location pages: mid-plan unless critical.
+    if (pt === "location_page" || pt === "location") return p >= 80 ? 30 : 60;
+    // Supporting informational content: later, unless unusually critical.
+    if (pt === "blog_article" || pt === "article" || intent === "informational") return p >= 80 ? 30 : p >= 60 ? 60 : 90;
+    // Guides / comparisons / FAQ: mid-to-late.
+    if (pt === "guide" || pt === "comparison" || pt === "faq") return p >= 80 ? 30 : p >= 60 ? 60 : 90;
+    // Refresh/optimization of existing pages: later.
+    if (t === "refresh" || t === "optimize" || isRefresh) return p >= 80 ? 30 : p >= 60 ? 60 : 90;
+    // Primary commercial/service pages.
+    return p >= 70 ? 30 : p >= 45 ? 60 : 90;
+  }
+
+  return p >= 70 ? 30 : p >= 45 ? 60 : 90;
+}
+
+// Backward-compatible wrapper (priority + type only).
 export function planHorizon(priority, type) {
-  if (type === "cannibalization" || type === "technical" || priority >= 70) return 30;
-  if (priority >= 45) return 60;
-  return 90;
+  return scheduleAction({ priority, type });
 }

@@ -361,6 +361,10 @@ async function main() {
     { name: "verified", type: "bool" },
     { name: "verified_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
     { name: "verified_at", type: "date", required: false },
+    // Data provenance: where a business fact came from. AI-inferred values are
+    // never auto-verified; Phase 4 must not convert them into factual claims.
+    { name: "provenance", type: "select", values: ["user_provided", "website", "crawler", "manual", "external_source", "ai_inferred", "unknown"], maxSelect: 1, required: false },
+    { name: "verification_state", type: "select", values: ["unverified", "verified", "ai_inferred", "user_confirmed", "unknown"], maxSelect: 1, required: false },
     ...overrideFields(),
     ...timestamps(),
   ], ADMIN_READ_RULES, {

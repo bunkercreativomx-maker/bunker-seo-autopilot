@@ -10,12 +10,24 @@ test("a declared location makes the keyword a local query", () => {
   assert.equal(classifyIntent("hvac repair near me"), "transactional");
 });
 
-test("brand-only queries stay navigational", () => {
-  assert.equal(classifyIntent("Tlaloc Sol Futuro paneles solares", context), "navigational");
+test("a pure brand query (brand alone) stays navigational", () => {
+  assert.equal(classifyIntent("Tlaloc Sol Futuro", context), "navigational");
+  assert.equal(classifyIntent("Tlaloc Sol Futuro website", context), "navigational");
+  assert.equal(classifyIntent("Tlaloc Sol Futuro official site", context), "navigational");
+});
+
+test("brand plus a declared service has meaningful mixed intent, not forced navigational", () => {
+  assert.equal(classifyIntent("Tlaloc Sol Futuro paneles solares", context), "mixed");
+  assert.equal(classifyIntent("Tlaloc Sol Futuro solar panel installation", context), "mixed");
 });
 
 test("a branded query that names a served location is still local", () => {
   assert.equal(classifyIntent("Tlaloc Sol Futuro paneles solares ciudad juarez", context), "local");
+});
+
+test("brand plus a strong transactional cue keeps the transactional intent", () => {
+  assert.equal(classifyIntent("Tlaloc Sol Futuro cotizar", context), "transactional");
+  assert.equal(classifyIntent("Tlaloc Sol Futuro quote", context), "transactional");
 });
 
 test("declared services without a location are commercially relevant, not navigational", () => {

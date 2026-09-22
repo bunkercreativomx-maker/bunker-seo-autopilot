@@ -1,3 +1,5 @@
+import { calculateCost } from "./cost.js";
+
 export class AIProviderError extends Error {
   constructor(message, options = {}) {
     super(message, options);
@@ -81,7 +83,7 @@ export class OpenAIProvider {
       usage: {
         inputTokens,
         outputTokens,
-        estimatedCost: (inputTokens * this.pricing.inputPerMillion + outputTokens * this.pricing.outputPerMillion) / 1_000_000,
+        estimatedCost: calculateCost({ inputTokens, outputTokens, pricing: this.pricing }),
       },
     };
   }
