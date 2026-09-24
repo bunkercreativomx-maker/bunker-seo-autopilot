@@ -161,7 +161,7 @@ export interface ArticleQaReport {
   status: "PASS" | "NEEDS_REVISION" | "BLOCKED";
   score?: number | null;
   checks?: Array<{ check: string; status: "pass" | "warn" | "fail"; details: string }>;
-  issues?: Array<{ severity: string; check: string; description: string; fix: string }>;
+  issues?: Array<{ severity: string; check: string; description: string; fix: string; classification?: string; origin?: string }>;
   flags?: string[];
   summary?: string;
   created: string;

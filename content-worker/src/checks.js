@@ -156,6 +156,62 @@ export function isStableGeneralKnowledge(claim) {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// QA issue classification (BLOCKER / MAJOR_ADVISORY / MINOR_ADVISORY / NOT_APPLICABLE)
+
+export const QA_CLASSIFICATIONS = ["BLOCKER", "MAJOR_ADVISORY", "MINOR_ADVISORY", "NOT_APPLICABLE"];
+// Checks about correctness: a reviewer "blocker" here stays a BLOCKER.
+const FACTUAL_CHECKS = new Set(["factual_consistency", "unsupported_claims", "hallucination_risk", "duplicate_content", "grammar"]);
+// Requests that would require evidence the business has not verified.
+const POLICY_REQUESTS = [
+  /\b(cfe|suministradora|interconexi|medidor bidireccional|tr[aá]mites?|gesti[oó]n con|permisos?)\b/i,
+  /\b(opciones? de pago|formas? de pago|payment options?|financ)/i,
+  /\b(casos?( ilustrativos| de [eé]xito| reales)?|case stud|testimoni|proyectos (realizados|reales|en)|referencias|portafolio|portfolio)\b/i,
+  /\b(plazos?|tiempos? (estimados|de respuesta|promedio)|timeline|response time)\b/i,
+  /\b(ahorro (promedio|estimado)|retorno|roi|payback|rangos? de (costo|precio)|precios?)\b/i,
+  /\b(recibo( de (cfe|luz|electricidad))?|diagn[oó]stico|visita t[eé]cnica|agendar)\b/i,
+];
+const WORD_COUNT = /(\b\d{3,4}\s*(palabras|words)\b|demasiado (corta|breve)|too (short|thin)|word count|longitud m[ií]nima|minimum length)/i;
+
+/**
+ * Classify a QA issue. Deterministic (code-produced) issues keep their
+ * severity. Reviewer suggestions that would need unverified business evidence
+ * (warranties, financing/payment, CFE process claims, case studies, project
+ * links, timelines, savings) are NOT_APPLICABLE; word count is advisory only.
+ */
+export function classifyQaIssue(issue, context) {
+  const sev = issue.severity;
+  if (issue.origin === "deterministic") return sev === "blocker" ? "BLOCKER" : sev === "major" ? "MAJOR_ADVISORY" : "MINOR_ADVISORY";
+  const text = `${issue.description || ""} ${issue.fix || ""}`;
+  if (FACTUAL_CHECKS.has(issue.check)) return sev === "blocker" ? "BLOCKER" : sev === "major" ? "MAJOR_ADVISORY" : "MINOR_ADVISORY";
+  const verified = context?.verified_facts || [];
+  const verifiedText = verified.map((f) => `${f.label} ${f.value}`).join(" ");
+  const verifiedTopics = new Set([...verified.map((f) => FACT_TYPE_TOPIC[f.type]), ...topicsIn(verifiedText)].filter(Boolean));
+  if (topicsIn(text).some((t) => !verifiedTopics.has(t))) return "NOT_APPLICABLE";
+  if (POLICY_REQUESTS.some((re) => re.test(text))) return "NOT_APPLICABLE";
+  if (issue.check === "internal_links" && (context?.internal_link_candidates || []).length <= 1) return "NOT_APPLICABLE";
+  if (WORD_COUNT.test(text)) return "MINOR_ADVISORY";
+  // Non-factual reviewer findings never block approval on their own.
+  return sev === "minor" ? "MINOR_ADVISORY" : "MAJOR_ADVISORY";
+}
+
+export function classifyQaCheck(check, context) {
+  if (check.status !== "fail") return check.status === "warning" ? "MINOR_ADVISORY" : "PASS";
+  return classifyQaIssue({ severity: FACTUAL_CHECKS.has(check.check) ? "blocker" : "major", check: check.check, description: check.details }, context);
+}
+
+/**
+ * High-risk status of the CURRENT version, from its claims and copy only
+ * (research-stage risk categories describe the topic, not this text).
+ */
+export function currentRisk(content, claims) {
+  const byClaims = new Set(claims.filter((c) => c.verification_status !== "NOT_REQUIRED" && ["medical", "legal", "financial"].includes(c.claim_type)).map((c) => c.claim_type));
+  const highClaims = claims.filter((c) => c.risk_level === "high").length;
+  const copy = detectRisk([content]);
+  const categories = [...new Set([...byClaims, ...copy.categories])];
+  return { high_risk: highClaims > 0 || categories.length > 0, categories, high_risk_claims: highClaims, copy_hits: copy.hits };
+}
+
 export function summarizeClaims(claims) {
   const blocking = claims.filter((c) => c.blocking);
   const unverified = claims.filter((c) => c.verification_status === "UNVERIFIED");
