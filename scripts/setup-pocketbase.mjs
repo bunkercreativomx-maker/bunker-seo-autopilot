@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Bunker SEO Autopilot — PocketBase schema bootstrap (Phases 1–3).
+ * Bunker SEO Autopilot — PocketBase schema bootstrap (Phases 1–4).
  * Creates/updates the multi-tenant collections and access rules idempotently.
  *
  * Usage:
@@ -77,6 +77,17 @@ async function ensureCollection(name, fields, rules, { bareName, indexes = [] } 
   REF[bareName || name] = j.id;
   console.log(`✓ ${name} created (${j.id})`);
   return j.id;
+}
+
+async function ensureSelectValues(name, fieldName, values) {
+  const col = await getCollection(name);
+  const field = col.fields.find((f) => f.name === fieldName);
+  if (!field) throw new Error(`${name}.${fieldName} missing`);
+  const merged = [...new Set([...(field.values || []), ...values])];
+  if (merged.length === (field.values || []).length) return;
+  field.values = merged;
+  await patchCollection(name, col);
+  console.log(`✓ ${name}.${fieldName} select values extended`);
 }
 
 function rel(name) {
@@ -587,6 +598,239 @@ async function main() {
     indexes: ['CREATE INDEX idx_ai_usage_client_task ON ai_usage (client, task, timestamp)'],
   });
 
+
+  // ---------- PHASE 4: AI content engine ----------
+  // Every content artifact is written by the content worker or by trusted
+  // server actions through the admin client after tenant authorization.
+  // Users can read rows of their own organization only.
+  const autodates = () => [
+    { name: "created", type: "autodate", onCreate: true, onUpdate: false },
+    { name: "updated", type: "autodate", onCreate: true, onUpdate: true },
+  ];
+  const CONTENT_TYPES = ["blog_article", "service_page", "location_page", "guide", "comparison", "faq_page", "existing_page_optimization"];
+
+  await ensureCollection("articles", [
+    ...tenantFields(),
+    { name: "content_opportunity", type: "relation", maxSelect: 1, collectionId: rel("content_opportunities"), required: false, cascadeDelete: false },
+    { name: "content_plan_item", type: "relation", maxSelect: 1, collectionId: rel("content_plan_items"), required: false, cascadeDelete: false },
+    { name: "keyword", type: "relation", maxSelect: 1, collectionId: rel("keywords"), required: false, cascadeDelete: false },
+    { name: "cluster", type: "relation", maxSelect: 1, collectionId: rel("topic_clusters"), required: false, cascadeDelete: false },
+    { name: "existing_page", type: "relation", maxSelect: 1, collectionId: rel("website_pages"), required: false, cascadeDelete: false },
+    { name: "content_type", type: "select", values: CONTENT_TYPES, maxSelect: 1, required: true },
+    { name: "title", type: "text", max: 300 },
+    { name: "slug", type: "text", max: 200 },
+    { name: "excerpt", type: "text", max: 1000 },
+    { name: "seo_title", type: "text", max: 200 },
+    { name: "meta_description", type: "text", max: 400 },
+    { name: "og_title", type: "text", max: 200 },
+    { name: "og_description", type: "text", max: 400 },
+    { name: "content", type: "editor", maxSize: 2000000 },
+    { name: "content_format", type: "select", values: ["markdown"], maxSelect: 1 },
+    { name: "existing_content", type: "editor", maxSize: 2000000 },
+    { name: "status", type: "select", values: ["researching", "brief_ready", "outline_ready", "drafting", "draft", "qa", "needs_revision", "awaiting_approval", "approved", "rejected", "failed"], maxSelect: 1, required: true },
+    { name: "primary_keyword", type: "text", max: 200 },
+    { name: "secondary_keywords", type: "json" },
+    { name: "target_location", type: "text", max: 200 },
+    { name: "recommended_url", type: "text", max: 500 },
+    { name: "featured_image", type: "text", max: 500 },
+    { name: "canonical_url", type: "text", max: 500 },
+    { name: "author", type: "text", max: 200 },
+    { name: "language", type: "text", max: 20, required: true },
+    { name: "brief", type: "json", maxSize: 500000 },
+    { name: "outline", type: "json", maxSize: 500000 },
+    { name: "structured_data", type: "json", maxSize: 200000 },
+    { name: "qa_status", type: "select", values: ["pending", "PASS", "NEEDS_REVISION", "BLOCKED", "stale"], maxSelect: 1 },
+    { name: "qa_score", type: "json" },
+    { name: "qa_summary", type: "editor" },
+    { name: "fact_check_status", type: "select", values: ["pending", "passed", "issues", "blocked", "stale"], maxSelect: 1 },
+    { name: "flags", type: "json" },
+    { name: "high_risk", type: "bool" },
+    { name: "risk_categories", type: "json" },
+    { name: "revision_cycles", type: "number", min: 0, onlyInt: true },
+    { name: "current_version", type: "number", min: 0, onlyInt: true },
+    { name: "generation_key", type: "text", max: 200 },
+    { name: "generation_input", type: "json" },
+    { name: "provenance", type: "json" },
+    { name: "pipeline_state", type: "json" },
+    { name: "approved_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "approved_at", type: "date", required: false },
+    { name: "rejected_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "rejected_at", type: "date", required: false },
+    { name: "rejection_reason", type: "text", max: 2000 },
+    { name: "created_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "articles",
+    indexes: [
+      "CREATE UNIQUE INDEX idx_articles_generation_key ON articles (generation_key) WHERE generation_key != ''",
+      "CREATE INDEX idx_articles_website_status ON articles (website, status)",
+      "CREATE INDEX idx_articles_client_status ON articles (client, status)",
+    ],
+  });
+
+  await ensureCollection("article_versions", [
+    ...tenantFields(),
+    { name: "article", type: "relation", maxSelect: 1, collectionId: rel("articles"), required: true, cascadeDelete: true },
+    { name: "version", type: "number", required: true, min: 1, onlyInt: true },
+    { name: "title", type: "text", max: 300 },
+    { name: "content", type: "editor", maxSize: 2000000 },
+    { name: "seo_title", type: "text", max: 200 },
+    { name: "meta_description", type: "text", max: 400 },
+    { name: "excerpt", type: "text", max: 1000 },
+    { name: "slug", type: "text", max: 200 },
+    { name: "change_type", type: "select", values: ["ai_generation", "ai_revision", "manual_edit", "restore"], maxSelect: 1, required: true },
+    { name: "change_reason", type: "text", max: 2000 },
+    { name: "created_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "created_by_label", type: "text", max: 200 },
+    { name: "created_at", type: "date", required: false },
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "article_versions",
+    indexes: ["CREATE UNIQUE INDEX idx_article_versions_article_version ON article_versions (article, version)"],
+  });
+
+  await ensureCollection("content_jobs", [
+    ...tenantFields(),
+    { name: "article", type: "relation", maxSelect: 1, collectionId: rel("articles"), required: true, cascadeDelete: true },
+    { name: "opportunity", type: "relation", maxSelect: 1, collectionId: rel("content_opportunities"), required: false, cascadeDelete: false },
+    { name: "plan_item", type: "relation", maxSelect: 1, collectionId: rel("content_plan_items"), required: false, cascadeDelete: false },
+    { name: "mode", type: "select", values: ["generate", "continue", "revision", "recheck"], maxSelect: 1, required: true },
+    { name: "status", type: "select", values: ["queued", "running", "completed", "failed", "cancelled"], maxSelect: 1, required: true },
+    { name: "step", type: "text" },
+    { name: "progress", type: "number", min: 0, max: 100 },
+    { name: "configuration", type: "json" },
+    { name: "revision_instruction", type: "text", max: 2000 },
+    { name: "attempt", type: "number", min: 0, onlyInt: true },
+    { name: "started_at", type: "date", required: false },
+    { name: "completed_at", type: "date", required: false },
+    { name: "error", type: "editor" },
+    { name: "error_code", type: "text", max: 100 },
+    { name: "triggered_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "content_jobs",
+    indexes: [
+      "CREATE INDEX idx_content_jobs_status ON content_jobs (status, created_at)",
+      "CREATE UNIQUE INDEX idx_content_jobs_active_article ON content_jobs (article) WHERE status IN ('queued', 'running')",
+    ],
+  });
+
+  await ensureCollection("research_sources", [
+    ...tenantFields(),
+    { name: "article", type: "relation", maxSelect: 1, collectionId: rel("articles"), required: true, cascadeDelete: true },
+    { name: "url", type: "text", required: true, max: 2000 },
+    { name: "normalized_url", type: "text", required: true, max: 2000 },
+    { name: "title", type: "text", max: 500 },
+    { name: "publisher", type: "text", max: 300 },
+    { name: "source_type", type: "select", values: ["government", "official", "manufacturer", "academic", "institution", "industry", "news", "client_site", "blog", "other"], maxSelect: 1, required: true },
+    { name: "retrieved_at", type: "date", required: false },
+    { name: "relevance", type: "number", min: 0, max: 1 },
+    { name: "quality", type: "number", min: 0, max: 1 },
+    { name: "notes", type: "text", max: 2000 },
+    { name: "excerpt", type: "editor", maxSize: 200000 },
+    { name: "query", type: "text", max: 500 },
+    { name: "verified_access", type: "bool" },
+    { name: "http_status", type: "number" },
+    { name: "provider", type: "text", max: 100 },
+    { name: "created_at", type: "date", required: false },
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "research_sources",
+    indexes: ["CREATE UNIQUE INDEX idx_research_sources_article_url ON research_sources (article, normalized_url)"],
+  });
+
+  await ensureCollection("article_research", [
+    ...tenantFields(),
+    { name: "article", type: "relation", maxSelect: 1, collectionId: rel("articles"), required: true, cascadeDelete: true },
+    { name: "search_intent", type: "text", max: 2000 },
+    { name: "audience", type: "text", max: 2000 },
+    { name: "questions", type: "json" },
+    { name: "facts", type: "json", maxSize: 500000 },
+    { name: "source_ids", type: "json" },
+    { name: "existing_content_summary", type: "editor" },
+    { name: "internal_link_candidates", type: "json" },
+    { name: "risks", type: "json" },
+    { name: "do_not_claim", type: "json" },
+    { name: "content_gaps", type: "json" },
+    { name: "recommended_angle", type: "editor" },
+    { name: "research_status", type: "select", values: ["completed", "limited", "research_required"], maxSelect: 1 },
+    { name: "research_notes", type: "text", max: 2000 },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "article_research",
+    indexes: ["CREATE UNIQUE INDEX idx_article_research_article ON article_research (article)"],
+  });
+
+  await ensureCollection("article_claims", [
+    ...tenantFields(),
+    { name: "article", type: "relation", maxSelect: 1, collectionId: rel("articles"), required: true, cascadeDelete: true },
+    { name: "version", type: "number", min: 0, onlyInt: true },
+    { name: "claim", type: "text", required: true, max: 2000 },
+    { name: "claim_type", type: "select", values: ["business", "external", "statistic", "product", "medical", "financial", "legal", "general"], maxSelect: 1, required: true },
+    { name: "source", type: "text", max: 500 },
+    { name: "source_id", type: "text", max: 100 },
+    { name: "evidence_ids", type: "json" },
+    { name: "verification_status", type: "select", values: ["PENDING", "VERIFIED", "SUPPORTED", "UNVERIFIED", "CONTRADICTED", "NOT_REQUIRED"], maxSelect: 1, required: true },
+    { name: "risk_level", type: "select", values: ["low", "medium", "high"], maxSelect: 1, required: true },
+    { name: "action", type: "select", values: ["approve", "flag", "rewrite", "remove"], maxSelect: 1 },
+    { name: "notes", type: "text", max: 2000 },
+    { name: "created_at", type: "date", required: false },
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "article_claims",
+    indexes: ["CREATE INDEX idx_article_claims_article_version ON article_claims (article, version)"],
+  });
+
+  await ensureCollection("article_internal_links", [
+    ...tenantFields(),
+    { name: "article", type: "relation", maxSelect: 1, collectionId: rel("articles"), required: true, cascadeDelete: true },
+    { name: "version", type: "number", min: 0, onlyInt: true },
+    { name: "destination_page", type: "relation", maxSelect: 1, collectionId: rel("website_pages"), required: false, cascadeDelete: false },
+    { name: "destination_url", type: "text", required: true, max: 2000 },
+    { name: "anchor_text", type: "text", max: 300 },
+    { name: "reason", type: "text", max: 1000 },
+    { name: "status", type: "select", values: ["inserted", "recommended", "removed"], maxSelect: 1, required: true },
+    { name: "created_at", type: "date", required: false },
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "article_internal_links",
+    indexes: ["CREATE INDEX idx_article_links_article_version ON article_internal_links (article, version)"],
+  });
+
+  await ensureCollection("article_qa_reports", [
+    ...tenantFields(),
+    { name: "article", type: "relation", maxSelect: 1, collectionId: rel("articles"), required: true, cascadeDelete: true },
+    { name: "version", type: "number", min: 0, onlyInt: true },
+    { name: "cycle", type: "number", min: 0, onlyInt: true },
+    { name: "status", type: "select", values: ["PASS", "NEEDS_REVISION", "BLOCKED"], maxSelect: 1, required: true },
+    { name: "score", type: "json" },
+    { name: "checks", type: "json", maxSize: 500000 },
+    { name: "issues", type: "json", maxSize: 500000 },
+    { name: "flags", type: "json" },
+    { name: "summary", type: "editor" },
+    { name: "created_at", type: "date", required: false },
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "article_qa_reports",
+    indexes: ["CREATE INDEX idx_article_qa_article_version ON article_qa_reports (article, version)"],
+  });
+
+  await ensureCollection("articles", [
+    { name: "research", type: "relation", maxSelect: 1, collectionId: rel("article_research"), required: false, cascadeDelete: false },
+  ], ADMIN_READ_RULES, { bareName: "articles" });
+
+  // ai_usage gains content-engine tasks + article/job attribution. A number
+  // field cannot hold null, so cost_status states whether estimated_cost is real.
+  await ensureCollection("ai_usage", [
+    { name: "article", type: "relation", maxSelect: 1, collectionId: rel("articles"), required: false, cascadeDelete: false },
+    { name: "content_job", type: "relation", maxSelect: 1, collectionId: rel("content_jobs"), required: false, cascadeDelete: false },
+    { name: "cost_status", type: "select", values: ["calculated", "pricing_not_configured"], maxSelect: 1 },
+  ], ADMIN_READ_RULES, { bareName: "ai_usage" });
+  await ensureSelectValues("ai_usage", "task", ["research_analysis", "brief_generation", "outline_generation", "draft_generation", "claim_extraction", "fact_check", "qa", "revision", "metadata"]);
+
   // --- users auth collection: add fields + tighten rules ---
   const usersCol = await getCollection(USERS_COLL);
   usersCol.fields = [...usersCol.fields.filter((f) =>
@@ -627,6 +871,7 @@ async function main() {
   console.log(`   strategy_jobs:   ${REF.strategy_jobs}`);
   console.log(`   strategy_versions: ${REF.strategy_versions}`);
   console.log(`   ai_usage:        ${REF.ai_usage}`);
+  for (const name of ["articles", "article_versions", "content_jobs", "research_sources", "article_research", "article_claims", "article_internal_links", "article_qa_reports"]) console.log(`   ${name}: ${REF[name]}`);
   console.log(`   PB_URL: ${PB_URL}`);
 }
 

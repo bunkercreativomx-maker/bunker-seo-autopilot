@@ -12,8 +12,10 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import PocketBase from "pocketbase";
 import { randomUUID } from "node:crypto";
+import { assertLocalTarget } from "./lib/local-only.mjs";
 
 const PB_URL = process.env.PB_URL || "http://127.0.0.1:8095";
+assertLocalTarget(PB_URL, "test-phase3");
 const ADMIN_EMAIL = process.env.PB_ADMIN_EMAIL || "admin@seo.autopilot";
 const ADMIN_PASSWORD = process.env.PB_ADMIN_PASSWORD || "SeoAutopilot!2026x";
 const PASS = "Phase3Test!2026";
