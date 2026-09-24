@@ -5,7 +5,6 @@ import { redirect } from "next/navigation";
 import { requireUser, canWrite } from "@/lib/pocketbase/auth";
 import { getWebsite } from "@/lib/pocketbase/websites";
 import { createCrawlJob } from "@/lib/pocketbase/analysis";
-import { logActivity } from "@/lib/pocketbase/activity";
 
 /**
  * Trigger a website analysis (or re-analysis) by creating a queued crawl job.
@@ -26,17 +25,7 @@ export async function analyzeWebsiteAction(formData: FormData): Promise<void> {
     const website = await getWebsite(pb, websiteId);
     if (!website) return;
 
-    const job = await createCrawlJob(pb, organization, website.id, website.client, user.id);
-    await logActivity({
-      organization,
-      user: user.id,
-      client: website.client,
-      website: website.id,
-      action: "WEBSITE_ANALYSIS_STARTED",
-      entity_type: "crawl_job",
-      entity_id: job.id,
-      metadata: { domain: website.domain },
-    });
+    await createCrawlJob(pb, organization, website.id, website.client, user.id);
   } catch (e) {
     console.error("[analysis] trigger failed", e);
   }

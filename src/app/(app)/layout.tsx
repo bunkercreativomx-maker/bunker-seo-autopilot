@@ -1,16 +1,14 @@
 import { requireUser } from "@/lib/pocketbase/auth";
-import { createBaseClient } from "@/lib/pocketbase/client";
 import { Sidebar } from "@/components/sidebar";
 import { UserMenu } from "@/components/user-menu";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user } = await requireUser();
+  const { pb, user } = await requireUser();
 
   // Resolve the organization name for the sidebar footer.
   let orgName = "My Organization";
   if (user.organization) {
     try {
-      const pb = createBaseClient();
       const org = await pb.collection("organizations").getOne(user.organization);
       orgName = (org as { name?: string }).name ?? orgName;
     } catch {

@@ -275,6 +275,11 @@ after(async () => {
     for (const id of [...(created.get(collection) || [])].reverse()) await remove(collection, id);
   }
   for (const id of [ids.pageA2, ids.pageA]) await remove("website_pages", id);
+  // Server-side activity logs (pb_hooks) written for this suite's own orgs.
+  for (const orgId of [ids.orgB, ids.orgA].filter(Boolean)) {
+    const rows = await admin.collection("activity_logs").getFullList({ filter: `organization = "${orgId}"`, fields: "id" }).catch(() => []);
+    for (const r of rows) await remove("activity_logs", r.id);
+  }
   for (const id of [ids.userB, ids.userA]) await remove("users", id);
   for (const id of [ids.websiteB, ids.websiteA]) await remove("websites", id);
   for (const id of [ids.clientB, ids.clientA]) await remove("clients", id);

@@ -1,17 +1,15 @@
 import { requireUser } from "@/lib/pocketbase/auth";
-import { createBaseClient } from "@/lib/pocketbase/client";
 import { Card, CardHeader, CardBody, PageHeader } from "@/components/ui";
 import { ProfileForm, OrganizationForm } from "@/components/settings-forms";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const { user } = await requireUser();
+  const { pb, user } = await requireUser();
 
   let orgName = "";
   if (user.organization) {
     try {
-      const pb = createBaseClient();
       const org = await pb.collection("organizations").getOne(user.organization);
       orgName = (org as { name?: string }).name ?? "";
     } catch {

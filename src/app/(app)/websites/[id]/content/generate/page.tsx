@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireUser, canWrite } from "@/lib/pocketbase/auth";
-import { adminAuth, createBaseClient } from "@/lib/pocketbase/client";
-import { prepareGeneration, ContentError } from "@/lib/content/core";
+import { requireUser } from "@/lib/pocketbase/auth";
+import { prepareGeneration, ContentError, canManageContent } from "@/lib/content/core";
 import { GenerateContentForm } from "@/components/content/generate-form";
 import { Card, CardBody, CardHeader } from "@/components/ui";
 
@@ -11,15 +10,12 @@ export const dynamic = "force-dynamic";
 export default async function GenerateContentPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ source?: string; sid?: string }> }) {
   const { id } = await params;
   const { source, sid } = await searchParams;
-  const { user } = await requireUser();
-  if (!canWrite(user.role)) notFound();
+  const { pb, user } = await requireUser();
+  if (!canManageContent(user.role)) notFound();
   if ((source !== "opportunity" && source !== "plan_item") || !sid || !/^[a-z0-9]{15}$/.test(sid)) notFound();
-  const admin = createBaseClient();
-  admin.autoCancellation(false);
-  await adminAuth(admin);
   let preview;
   try {
-    preview = await prepareGeneration(admin, { id: user.id, organization: user.organization ?? "", role: user.role }, id, { kind: source, id: sid });
+    preview = await prepareGeneration(pb, { id: user.id, organization: user.organization ?? "", role: user.role }, id, { kind: source, id: sid });
   } catch (error) {
     const message = error instanceof ContentError ? error.message : "Could not prepare generation.";
     return <div className="mt-6"><Card><CardBody><p className="text-sm text-rose-700">{message}</p><Link href={`/websites/${id}/strategy`} className="mt-3 inline-block text-sm text-sky-700">← Back to strategy</Link></CardBody></Card></div>;

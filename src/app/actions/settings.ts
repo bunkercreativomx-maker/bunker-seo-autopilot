@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/pocketbase/auth";
-import { createBaseClient } from "@/lib/pocketbase/client";
+import { OperationError, userOperation } from "@/lib/pocketbase/operations";
 
 export type SettingsState = { error?: string; success?: string } | undefined;
 
@@ -12,6 +12,8 @@ export async function updateProfileAction(_prev: SettingsState, formData: FormDa
   if (!name) return { error: "Name is required." };
 
   try {
+    // Only the name is sent; role/organization/status changes are rejected by
+    // the users update guard in pb_hooks/bsa_activity.pb.js.
     await pb.collection("users").update(user.id, { name });
   } catch (e) {
     console.error("[settings] profile update failed", e);
@@ -22,21 +24,17 @@ export async function updateProfileAction(_prev: SettingsState, formData: FormDa
 }
 
 export async function updateOrganizationAction(_prev: SettingsState, formData: FormData): Promise<SettingsState> {
-  const { user } = await requireUser();
+  const { pb, user } = await requireUser();
   if (!user.organization) return { error: "Your account is not linked to an organization." };
 
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { error: "Organization name is required." };
 
   try {
-    // organizations.updateRule is null (superuser only), so use the admin client.
-    const pb = createBaseClient();
-    const email = process.env.PB_ADMIN_EMAIL;
-    const password = process.env.PB_ADMIN_PASSWORD;
-    if (!email || !password) return { error: "Server admin credentials not configured." };
-    await pb.collection("_superusers").authWithPassword(email, password);
-    await pb.collection("organizations").update(user.organization, { name });
+    // PocketBase validates that the caller is an admin of THIS organization.
+    await userOperation(pb, "organization", { name });
   } catch (e) {
+    if (e instanceof OperationError && e.status < 500) return { error: e.message };
     console.error("[settings] org update failed", e);
     return { error: "Could not update the organization." };
   }
