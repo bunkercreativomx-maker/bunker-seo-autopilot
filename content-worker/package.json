@@ -1,0 +1,17 @@
+{
+  "name": "bunker-seo-content",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 4 evidence-based AI content engine worker (research, brief, outline, draft, claims, fact check, QA).",
+  "scripts": {
+    "start": "node worker.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "pocketbase": "^0.28.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

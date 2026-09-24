@@ -47,6 +47,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         description={client.description || "No description provided."}
         action={
           <div className="flex items-center gap-2">
+            <Link href={`/clients/${client.id}/content`}>
+              <Button variant="secondary">Content</Button>
+            </Link>
             <Link href={`/clients/${client.id}/edit`}>
               <Button variant="secondary">Edit Client</Button>
             </Link>

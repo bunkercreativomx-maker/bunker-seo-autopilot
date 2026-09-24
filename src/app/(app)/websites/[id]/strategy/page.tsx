@@ -3,6 +3,7 @@ import { getWebsite } from "@/lib/pocketbase/websites";
 import { getClient } from "@/lib/pocketbase/clients";
 import { getLatestSnapshot } from "@/lib/pocketbase/analysis";
 import { getStrategyData } from "@/lib/pocketbase/strategy";
+import { contentLinksForWebsite } from "@/lib/pocketbase/content";
 import { BusinessContextForm } from "@/components/business-context-form";
 import { StrategyDashboard } from "@/components/strategy-dashboard";
 import { StrategyGenerateButton } from "@/components/strategy-generate-button";
@@ -22,6 +23,7 @@ export default async function WebsiteStrategyPage({ params }: { params: Promise<
   const client = website.expand?.client ?? await getClient(pb, website.client);
   const snapshot = await getLatestSnapshot(pb, website.id);
   const strategy = await getStrategyData(pb, website.id);
+  const content = await contentLinksForWebsite(pb, website.id);
   if (!client) return null;
 
   const editable = canWrite(user.role);
@@ -54,7 +56,8 @@ export default async function WebsiteStrategyPage({ params }: { params: Promise<
       </Card>
 
       <Card>
-        <CardHeader title="Business Context" subtitle={`Shared client profile for ${client.business_name}. Changes here also update the client record.`} />
+        <span id="business-context" />
+        <CardHeader title="Business Context"  subtitle={`Shared client profile for ${client.business_name}. Changes here also update the client record.`} />
         <CardBody><BusinessContextForm websiteId={website.id} client={client} canEdit={editable} /></CardBody>
       </Card>
 
@@ -64,7 +67,7 @@ export default async function WebsiteStrategyPage({ params }: { params: Promise<
           description={snapshot ? "Review the business context, then generate a strategy from real crawl and research data." : "Run a website analysis before generating a strategy."}
         />
       ) : (
-        <StrategyDashboard websiteId={website.id} data={strategy} canEdit={editable} />
+        <StrategyDashboard websiteId={website.id} data={strategy} canEdit={editable} content={content} />
       )}
     </div>
   );
