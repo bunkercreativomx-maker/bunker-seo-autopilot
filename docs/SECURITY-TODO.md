@@ -1,11 +1,13 @@
 # Security TODO — REQUIRED before Phase 5
 
+> **STATUS: DONE (2026-09-24).** PB superuser + app admin passwords rotated; protected credential files updated (600); crawler/intelligence/content workers recreated and authenticated with the new credential; old passwords rejected; all pre-rotation app admin sessions revoked (tokenKey rotation, old tokens → 401); new login + refresh + dashboard verified; prod tenant/security regression 26/26 with temporary data fully removed. No secret values are stored in this repo.
+
 Status: OPEN · Owner: Bunker ops · Created 2026-09-24 (after Phase 4 acceptance)
 
 Do NOT start Phase 5 until both items are closed. Never rotate while a
 `content_jobs` / `strategy_jobs` / `crawl_jobs` record is `running`.
 
-## 1. ROTATE PB SUPERUSER CREDENTIALS
+## 1. ROTATE PB SUPERUSER CREDENTIALS — ✅ done
 
 Why: the previous superuser password was stored in plain text inside the
 Portainer stack 14 compose (removed during the auth fix, but it was visible in
@@ -22,7 +24,7 @@ Steps:
    (`$app.refreshTokenKey` / Dashboard → superuser → "Invalidate all tokens")
    and confirm the old password fails `auth-with-password`.
 
-## 2. ROTATE APP ADMIN PASSWORD
+## 2. ROTATE APP ADMIN PASSWORD — ✅ done
 
 Why: `/opt/data/.pb-seo-login.txt` held the `admin@bunkercreativo.mx`
 application password in plain text and it was used for automated smoke tests.
