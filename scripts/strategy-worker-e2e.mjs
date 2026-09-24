@@ -9,8 +9,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import PocketBase from "pocketbase";
+import { assertLocalTarget } from "./lib/local-only.mjs";
 
 const PB_URL = process.env.PB_URL || "http://127.0.0.1:8095";
+assertLocalTarget(PB_URL, "strategy-worker-e2e");
 const ADMIN_EMAIL = process.env.PB_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.PB_ADMIN_PASSWORD;
 if (!ADMIN_EMAIL || !ADMIN_PASSWORD) throw new Error("PB_ADMIN_EMAIL and PB_ADMIN_PASSWORD are required");

@@ -10,8 +10,10 @@
  */
 import { spawn } from "node:child_process";
 import PocketBase from "pocketbase";
+import { assertLocalTarget } from "./lib/local-only.mjs";
 
 const PB_URL = process.env.PB_URL || "http://127.0.0.1:8095";
+assertLocalTarget(PB_URL, "worker-e2e");
 const ADMIN_EMAIL = process.env.PB_ADMIN_EMAIL || "admin@seo.autopilot";
 const ADMIN_PASSWORD = process.env.PB_ADMIN_PASSWORD || "SeoAutopilot!2026x";
 const TARGET = process.env.E2E_TARGET || "books.toscrape.com";
