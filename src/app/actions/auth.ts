@@ -3,8 +3,8 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createBaseClient } from "@/lib/pocketbase/client";
-import { AUTH_COOKIE } from "@/lib/pocketbase/auth";
-import { logActivity } from "@/lib/pocketbase/activity";
+import { AUTH_COOKIE, getSessionClient, serializeSession, sessionCookieOptions } from "@/lib/pocketbase/auth";
+import { userOperation } from "@/lib/pocketbase/operations";
 
 export type LoginState = { error?: string } | undefined;
 
@@ -16,46 +16,31 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     return { error: "Email and password are required." };
   }
 
+  // USER_LOGIN is logged inside PocketBase (pb_hooks/bsa_activity.pb.js).
   const pb = createBaseClient();
   try {
     await pb.collection("users").authWithPassword(email, password);
   } catch {
     return { error: "Invalid credentials." };
   }
+  const status = (pb.authStore.record as { status?: string } | null)?.status;
+  if (status && status !== "active") return { error: "This account is disabled." };
 
-  const model = pb.authStore.model as { id?: string; organization?: string } | null;
-    const userId = model?.id ?? "";
-    const orgId = model?.organization ?? "";
-
-    // Persist PocketBase's own authStore (token + model) in an httpOnly cookie.
-    // loadFromCookie expects the JSON-serialized authStore, not the bare token.
-    const cookieValue = encodeURIComponent(
-      JSON.stringify({ token: pb.authStore.token, model: pb.authStore.model })
-    );
-    const cookieStore = await cookies();
-    cookieStore.set(AUTH_COOKIE, cookieValue, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-    });
-
-  // Log the login (best-effort; never blocks the redirect).
-  if (orgId) {
-    await logActivity({
-      organization: orgId,
-      user: userId,
-      action: "USER_LOGIN",
-      entity_type: "user",
-      entity_id: userId,
-    });
-  }
+  // Always replace any existing cookie with the freshly minted token
+  // (prevents session fixation). Only the token is stored.
+  const cookieStore = await cookies();
+  cookieStore.delete(AUTH_COOKIE);
+  cookieStore.set(AUTH_COOKIE, serializeSession(pb.authStore.token), sessionCookieOptions());
 
   redirect("/dashboard");
 }
 
 export async function logout(): Promise<void> {
+  // Revoke every token of this user server-side, then drop the cookie.
+  const pb = await getSessionClient();
+  if (pb) {
+    await userOperation(pb, "logout", {}).catch((error) => console.warn("[auth] server-side logout failed", error));
+  }
   const cookieStore = await cookies();
   cookieStore.delete(AUTH_COOKIE);
   redirect("/login");

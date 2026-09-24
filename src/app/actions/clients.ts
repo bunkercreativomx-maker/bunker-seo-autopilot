@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, canWrite } from "@/lib/pocketbase/auth";
 import { createClient, updateClient, archiveClient } from "@/lib/pocketbase/clients";
-import { logActivity } from "@/lib/pocketbase/activity";
 import { clientSchema, clientSlug } from "@/lib/validation";
 
 export type ClientActionState = { error?: string; fieldErrors?: Record<string, string[]> } | undefined;
@@ -42,18 +41,9 @@ export async function createClientAction(_prev: ClientActionState, formData: For
   if (!organization) return { error: "Your account is not linked to an organization." };
 
   try {
-    const client = await createClient(pb, organization, {
+    await createClient(pb, organization, {
       ...parsed.data,
       slug: clientSlug(parsed.data.business_name),
-    });
-    await logActivity({
-      organization,
-      user: user.id,
-      client: client.id,
-      action: "CLIENT_CREATED",
-      entity_type: "client",
-      entity_id: client.id,
-      metadata: { business_name: client.business_name },
     });
   } catch (e) {
     console.error("[client] create failed", e);
@@ -96,16 +86,7 @@ export async function updateClientAction(_prev: ClientActionState, formData: For
   if (!parsed.success) return { fieldErrors: parsed.error.flatten().fieldErrors };
 
   try {
-    const client = await updateClient(pb, id, parsed.data);
-    await logActivity({
-      organization: user.organization ?? "",
-      user: user.id,
-      client: client.id,
-      action: "CLIENT_UPDATED",
-      entity_type: "client",
-      entity_id: client.id,
-      metadata: { business_name: client.business_name },
-    });
+    await updateClient(pb, id, parsed.data);
   } catch (e) {
     console.error("[client] update failed", e);
     return { error: "Could not update the client." };
@@ -125,16 +106,7 @@ export async function archiveClientAction(formData: FormData): Promise<void> {
   if (!id) return;
 
   try {
-    const client = await archiveClient(pb, id);
-    await logActivity({
-      organization: user.organization ?? "",
-      user: user.id,
-      client: client.id,
-      action: "CLIENT_ARCHIVED",
-      entity_type: "client",
-      entity_id: client.id,
-      metadata: { business_name: client.business_name },
-    });
+    await archiveClient(pb, id);
   } catch (e) {
     console.error("[client] archive failed", e);
   }

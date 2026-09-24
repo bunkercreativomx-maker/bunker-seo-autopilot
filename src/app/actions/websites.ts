@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser, canWrite } from "@/lib/pocketbase/auth";
 import { createWebsite, updateWebsite, archiveWebsite } from "@/lib/pocketbase/websites";
-import { logActivity } from "@/lib/pocketbase/activity";
 import { websiteSchema } from "@/lib/validation";
 import { normalizeDomain, normalizeUrl } from "@/lib/types";
 
@@ -35,22 +34,12 @@ export async function createWebsiteAction(_prev: WebsiteActionState, formData: F
   if (!organization) return { error: "Your account is not linked to an organization." };
 
   try {
-    const website = await createWebsite(pb, organization, {
+    await createWebsite(pb, organization, {
       ...parsed.data,
       domain: normalizeDomain(parsed.data.domain),
       sitemap_url: normalizeUrl(parsed.data.sitemap_url ?? ""),
       robots_url: normalizeUrl(parsed.data.robots_url ?? ""),
       blog_url: normalizeUrl(parsed.data.blog_url ?? ""),
-    });
-    await logActivity({
-      organization,
-      user: user.id,
-      client: website.client,
-      website: website.id,
-      action: "WEBSITE_CREATED",
-      entity_type: "website",
-      entity_id: website.id,
-      metadata: { name: website.name, domain: website.domain },
     });
   } catch (e) {
     console.error("[website] create failed", e);
@@ -88,22 +77,12 @@ export async function updateWebsiteAction(_prev: WebsiteActionState, formData: F
   if (!parsed.success) return { fieldErrors: parsed.error.flatten().fieldErrors };
 
   try {
-    const website = await updateWebsite(pb, id, {
+    await updateWebsite(pb, id, {
       ...parsed.data,
       domain: normalizeDomain(parsed.data.domain),
       sitemap_url: normalizeUrl(parsed.data.sitemap_url ?? ""),
       robots_url: normalizeUrl(parsed.data.robots_url ?? ""),
       blog_url: normalizeUrl(parsed.data.blog_url ?? ""),
-    });
-    await logActivity({
-      organization: user.organization ?? "",
-      user: user.id,
-      client: website.client,
-      website: website.id,
-      action: "WEBSITE_UPDATED",
-      entity_type: "website",
-      entity_id: website.id,
-      metadata: { name: website.name, domain: website.domain },
     });
   } catch (e) {
     console.error("[website] update failed", e);
@@ -125,17 +104,7 @@ export async function archiveWebsiteAction(formData: FormData): Promise<void> {
   if (!id) return;
 
   try {
-    const website = await archiveWebsite(pb, id);
-    await logActivity({
-      organization: user.organization ?? "",
-      user: user.id,
-      client: website.client,
-      website: website.id,
-      action: "WEBSITE_ARCHIVED",
-      entity_type: "website",
-      entity_id: website.id,
-      metadata: { name: website.name, domain: website.domain },
-    });
+    await archiveWebsite(pb, id);
   } catch (e) {
     console.error("[website] archive failed", e);
   }

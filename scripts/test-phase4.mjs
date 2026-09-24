@@ -6,7 +6,10 @@
  * research failure, prompt injection, SSRF and cross-client leakage.
  *
  * Prereq: PB_URL=http://127.0.0.1:8097 node scripts/setup-pocketbase.mjs
- * Usage:  PB_URL=http://127.0.0.1:8097 PB_ADMIN_EMAIL=... PB_ADMIN_PASSWORD=... node --test scripts/test-phase4.mjs
+ * Usage:  PB_URL=http://127.0.0.1:8097 PB_ADMIN_EMAIL=... PB_ADMIN_PASSWORD=... node --test --experimental-strip-types scripts/test-phase4.mjs
+ * Requires PocketBase to run with --hooksDir=<repo>/pb_hooks. The superuser
+ * is used ONLY for fixtures, the worker and assertions; every human action
+ * uses a regular user's token.
  *
  * LOCAL ONLY (guarded). Creates uniquely tagged fixtures and deletes only them.
  */
@@ -39,6 +42,38 @@ let userB;
 const ids = {};
 let actorA;
 let actorB;
+
+// ---------------------------------------------------------------- user-token operations
+// Human actions go through the SAME PocketBase endpoints the web app uses
+// (pb_hooks/bsa_routes.pb.js), authenticated with the USER's own token —
+// never a superuser. `actor` objects map to authenticated user clients.
+const userClients = new Map();
+class OpError extends Error {
+  constructor(status, code, message) { super(message); this.status = status; this.code = code; }
+}
+async function op(actor, path, body) {
+  const pb = userClients.get(actor.id);
+  if (!pb) throw new Error(`no user client for ${actor.id}`);
+  try {
+    return await pb.send(`/api/bsa/${path}`, { method: "POST", body, requestKey: null });
+  } catch (e) {
+    throw new OpError(e.status, e.response?.code, e.response?.message || String(e));
+  }
+}
+const ops = {
+  startGeneration: async (actor, websiteId, source, inputs) => {
+    const r = await op(actor, "content/generate", { websiteId, source, inputs });
+    return { article: await admin.collection("articles").getOne(r.article.id), job: r.job ? await admin.collection("content_jobs").getOne(r.job.id) : null, created: r.created };
+  },
+  saveManualEdit: (actor, articleId, fields, reason = "") => op(actor, "content/edit", { articleId, fields, reason }),
+  restoreVersion: async (actor, articleId, version) => (await op(actor, "content/restore", { articleId, version })).version,
+  approveArticle: async (actor, articleId, opts = {}) => { await op(actor, "content/approve", { articleId, ...opts }); return admin.collection("articles").getOne(articleId); },
+  rejectArticle: async (actor, articleId, reason) => { await op(actor, "content/reject", { articleId, reason }); return admin.collection("articles").getOne(articleId); },
+  requestRevision: async (actor, articleId, instruction) => admin.collection("content_jobs").getOne((await op(actor, "content/revision", { articleId, instruction })).id),
+  retryGeneration: async (actor, articleId) => admin.collection("content_jobs").getOne((await op(actor, "content/retry", { articleId })).id),
+  requestRecheck: async (actor, articleId) => admin.collection("content_jobs").getOne((await op(actor, "content/recheck", { articleId })).id),
+  cancelJob: (actor, jobId) => op(actor, "content/cancel", { jobId }),
+};
 
 const CONFIG = loadContentConfig({ AI_PROVIDER: "null", AI_MAX_RETRIES: "0", AI_TIMEOUT_MS: "5000", WRITER_TIMEOUT_MS: "5000", MAX_AI_CALLS_PER_ARTICLE: "40", MAX_REVISION_CYCLES: "2", MAX_RESEARCH_SOURCES: "3" });
 const quiet = { log() {}, warn() {}, error() {} };
@@ -218,8 +253,14 @@ async function fixtures() {
   actorB = { id: uB.id, organization: orgB.id, role: "admin", name: `${TAG} B` };
   ids.viewer = { id: uV.id, organization: orgA.id, role: "viewer" };
   userA = new PocketBase(PB_URL); userB = new PocketBase(PB_URL);
+  userA.autoCancellation(false); userB.autoCancellation(false);
   await userA.collection("users").authWithPassword(`${TAG}-a@test.local`, PASS);
   await userB.collection("users").authWithPassword(`${TAG}-b@test.local`, PASS);
+  const viewer = new PocketBase(PB_URL);
+  viewer.autoCancellation(false);
+  await viewer.collection("users").authWithPassword(`${TAG}-v@test.local`, PASS);
+  userClients.set(uA.id, userA); userClients.set(uB.id, userB); userClients.set(uV.id, viewer);
+  ids.viewerClient = viewer;
 
   const A = base(orgA.id, clientA.id, websiteA.id);
   const B = base(orgB.id, clientB.id, websiteB.id);
@@ -313,30 +354,32 @@ test("P4 RULES: users cannot write content collections directly; other orgs cann
 
 // ================================================================= trigger
 test("P4 TRIGGER: preview shows editable inputs + verified business context only", async () => {
-  const preview = await core.prepareGeneration(admin, actorA, ids.websiteA, { kind: "opportunity", id: ids.oppMain });
+  const preview = await core.prepareGeneration(userA, actorA, ids.websiteA, { kind: "opportunity", id: ids.oppMain });
   assert.equal(preview.defaults.content_type, "blog_article");
   assert.equal(preview.defaults.primary_keyword, "paneles solares");
   assert.equal(preview.defaults.recommended_url, "/blog/paneles-solares-hogar");
   assert.equal(preview.defaults.language, "es");
   assert.deepEqual(preview.business_context.verified_facts.map((f) => f.label).sort(), ["Financiamiento", "Teléfono"]);
   assert.equal(preview.business_context.unverified_fact_count, 1, "ai_inferred warranty stays unverified");
-  const loc = await core.prepareGeneration(admin, actorA, ids.websiteA, { kind: "opportunity", id: ids.oppLocation });
+  const loc = await core.prepareGeneration(userA, actorA, ids.websiteA, { kind: "opportunity", id: ids.oppLocation });
   assert.equal(loc.defaults.content_type, "location_page");
 });
 
 test("P4 TRIGGER: only approved sources; tenant + role enforced; input validation", async () => {
-  await assert.rejects(() => core.startGeneration(admin, actorA, ids.websiteA, { kind: "opportunity", id: ids.oppProposed }, { content_type: "blog_article", primary_keyword: "x y", language: "es" }), /approved/);
-  await assert.rejects(() => core.startGeneration(admin, actorB, ids.websiteA, { kind: "opportunity", id: ids.oppMain }, { content_type: "blog_article", primary_keyword: "x y", language: "es" }), /not found/i);
-  await assert.rejects(() => core.startGeneration(admin, actorA, ids.websiteA, { kind: "opportunity", id: ids.oppB }, { content_type: "blog_article", primary_keyword: "x y", language: "es" }), /not found/i);
-  await assert.rejects(() => core.startGeneration(admin, ids.viewer, ids.websiteA, { kind: "opportunity", id: ids.oppMain }, { content_type: "blog_article", primary_keyword: "x y", language: "es" }), /permission/);
-  assert.throws(() => core.validateInputs({ content_type: "press_release", primary_keyword: "abc", language: "es" }), /content type/);
-  assert.throws(() => core.validateInputs({ content_type: "location_page", primary_keyword: "abc", language: "es" }), /target location/);
-  assert.throws(() => core.validateInputs({ content_type: "blog_article", primary_keyword: "abc", language: "es", recommended_url: "javascript:alert(1)" }), /Recommended URL/);
+  await assert.rejects(() => ops.startGeneration(actorA, ids.websiteA, { kind: "opportunity", id: ids.oppProposed }, { content_type: "blog_article", primary_keyword: "x y", language: "es" }), /approved/);
+  await assert.rejects(() => ops.startGeneration(actorB, ids.websiteA, { kind: "opportunity", id: ids.oppMain }, { content_type: "blog_article", primary_keyword: "x y", language: "es" }), /not found/i);
+  await assert.rejects(() => ops.startGeneration(actorA, ids.websiteA, { kind: "opportunity", id: ids.oppB }, { content_type: "blog_article", primary_keyword: "x y", language: "es" }), /not found/i);
+  await assert.rejects(() => ops.startGeneration(ids.viewer, ids.websiteA, { kind: "opportunity", id: ids.oppMain }, { content_type: "blog_article", primary_keyword: "x y", language: "es" }), /permission/);
+  const src = { kind: "opportunity", id: ids.oppMain };
+  await assert.rejects(() => ops.startGeneration(actorA, ids.websiteA, src, { content_type: "press_release", primary_keyword: "abc", language: "es" }), /content type/);
+  await assert.rejects(() => ops.startGeneration(actorA, ids.websiteA, src, { content_type: "location_page", primary_keyword: "abc", language: "es" }), /target location/);
+  await assert.rejects(() => ops.startGeneration(actorA, ids.websiteA, src, { content_type: "blog_article", primary_keyword: "abc", language: "es", recommended_url: "javascript:alert(1)" }), /Recommended URL/);
+  assert.equal((await list("articles", `content_opportunity = "${ids.oppMain}"`)).length, 0, "invalid inputs created nothing");
 });
 
 test("P4 IDEMPOTENCY: repeated/concurrent Generate clicks create one article and one job", async () => {
   const inputs = { content_type: "blog_article", primary_keyword: "paneles solares", target_location: "", recommended_url: "/blog/paneles-solares-hogar", reason: "gap", language: "es" };
-  const results = await Promise.all([1, 2, 3].map(() => core.startGeneration(admin, actorA, ids.websiteA, { kind: "opportunity", id: ids.oppMain }, inputs)));
+  const results = await Promise.all([1, 2, 3].map(() => ops.startGeneration(actorA, ids.websiteA, { kind: "opportunity", id: ids.oppMain }, inputs)));
   const articleIds = new Set(results.map((r) => r.article.id));
   assert.equal(articleIds.size, 1);
   const [articleId] = articleIds;
@@ -345,14 +388,14 @@ test("P4 IDEMPOTENCY: repeated/concurrent Generate clicks create one article and
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].mode, "generate");
   ids.mainJob = jobs[0].id;
-  const again = await core.startGeneration(admin, actorA, ids.websiteA, { kind: "opportunity", id: ids.oppMain }, inputs);
+  const again = await ops.startGeneration(actorA, ids.websiteA, { kind: "opportunity", id: ids.oppMain }, inputs);
   assert.equal(again.created, false);
   assert.equal(again.article.id, articleId);
   // A plan item derived from the same opportunity opens the same draft (no accidental second article).
-  const viaPlan = await core.startGeneration(admin, actorA, ids.websiteA, { kind: "plan_item", id: ids.planLinked }, inputs);
+  const viaPlan = await ops.startGeneration(actorA, ids.websiteA, { kind: "plan_item", id: ids.planLinked }, inputs);
   assert.equal(viaPlan.created, false);
   assert.equal(viaPlan.article.id, articleId);
-  const preview = await core.prepareGeneration(admin, actorA, ids.websiteA, { kind: "plan_item", id: ids.planLinked });
+  const preview = await core.prepareGeneration(userA, actorA, ids.websiteA, { kind: "plan_item", id: ids.planLinked });
   assert.equal(preview.existing_article?.id, articleId);
   const logs = await list("activity_logs", `entity_id = "${articleId}" && action = "CONTENT_GENERATION_STARTED"`);
   assert.equal(logs.length, 1);
@@ -433,7 +476,7 @@ test("P4 PIPELINE: research → sources → brief → outline → draft → clai
   const usage = await list("ai_usage", `article = "${ids.main}"`);
   assert.equal(usage.length, provider.calls.length);
   assert.ok(usage.every((u) => u.content_job === ids.mainJob && u.cost_status === "pricing_not_configured" && u.estimated_cost === 0));
-  const summary = await core.articleUsage(admin, ids.main);
+  const summary = await core.articleUsage(userA, ids.main);
   assert.equal(summary.calls, provider.calls.length);
   assert.equal(summary.estimated_cost, null);
 
@@ -482,18 +525,18 @@ test("P4 TENANT: a job whose tenant does not match its article fails closed", as
 // ================================================================= human review
 test("P4 EDIT/VERSIONS/RESTORE: manual edit versions + invalidates QA; restore creates a new version", async () => {
   const before = await admin.collection("articles").getOne(ids.main);
-  const unchanged = await core.saveManualEdit(admin, actorA, ids.main, { title: before.title });
+  const unchanged = await ops.saveManualEdit(actorA, ids.main, { title: before.title });
   assert.equal(unchanged.changed, false);
-  const edited = await core.saveManualEdit(admin, actorA, ids.main, { content: `${before.content}\n\nPárrafo añadido por el editor.`, slug: "paneles-solares-hogar" }, "Añadir párrafo");
+  const edited = await ops.saveManualEdit(actorA, ids.main, { content: `${before.content}\n\nPárrafo añadido por el editor.`, slug: "paneles-solares-hogar" }, "Añadir párrafo");
   assert.equal(edited.version, 3);
   let article = await admin.collection("articles").getOne(ids.main);
   assert.equal(article.status, "draft");
   assert.equal(article.qa_status, "stale");
-  await assert.rejects(() => core.approveArticle(admin, actorA, ids.main, { acknowledgeHighRisk: true }), /QA has not run|only content awaiting approval/);
-  await assert.rejects(() => core.saveManualEdit(admin, actorA, ids.main, { slug: "Bad Slug!" }), /Slug/);
-  await assert.rejects(() => core.saveManualEdit(admin, actorB, ids.main, { title: "hack" }), /not found/i);
+  await assert.rejects(() => ops.approveArticle(actorA, ids.main, { acknowledgeHighRisk: true }), /QA has not run|only content awaiting approval/);
+  await assert.rejects(() => ops.saveManualEdit(actorA, ids.main, { slug: "Bad Slug!" }), /Slug/);
+  await assert.rejects(() => ops.saveManualEdit(actorB, ids.main, { title: "hack" }), /not found/i);
 
-  const restored = await core.restoreVersion(admin, actorA, ids.main, 2);
+  const restored = await ops.restoreVersion(actorA, ids.main, 2);
   assert.equal(restored, 4);
   article = await admin.collection("articles").getOne(ids.main);
   const v2 = (await list("article_versions", `article = "${ids.main}" && version = 2`))[0];
@@ -505,24 +548,24 @@ test("P4 EDIT/VERSIONS/RESTORE: manual edit versions + invalidates QA; restore c
 });
 
 test("P4 APPROVAL: recheck → awaiting approval; high-risk needs acknowledgement; approve sets approved_by/at", async () => {
-  const job = await core.requestRecheck(admin, actorA, ids.main);
+  const job = await ops.requestRecheck(actorA, ids.main);
   const { error } = await runJob(job);
   assert.equal(error, undefined, error?.stack);
   let article = await admin.collection("articles").getOne(ids.main);
   assert.equal(article.status, "awaiting_approval");
-  await assert.rejects(() => core.approveArticle(admin, actorA, ids.main), (e) => e.code === "HIGH_RISK_REVIEW_REQUIRED");
-  await assert.rejects(() => core.approveArticle(admin, actorB, ids.main, { acknowledgeHighRisk: true }), /not found/i);
-  article = await core.approveArticle(admin, actorA, ids.main, { acknowledgeHighRisk: true });
+  await assert.rejects(() => ops.approveArticle(actorA, ids.main), (e) => e.code === "HIGH_RISK_REVIEW_REQUIRED");
+  await assert.rejects(() => ops.approveArticle(actorB, ids.main, { acknowledgeHighRisk: true }), /not found/i);
+  article = await ops.approveArticle(actorA, ids.main, { acknowledgeHighRisk: true });
   assert.equal(article.status, "approved");
   assert.equal(article.approved_by, ids.userA);
   assert.ok(article.approved_at);
   assert.equal(article.provenance.auto_publish_allowed, false);
-  await assert.rejects(() => core.saveManualEdit(admin, actorA, ids.main, { title: "x" }), /locked/);
+  await assert.rejects(() => ops.saveManualEdit(actorA, ids.main, { title: "x" }), /locked/);
   assert.ok((await list("activity_logs", `entity_id = "${ids.main}" && action = "ARTICLE_APPROVED"`)).length === 1);
 });
 
 test("P4 REQUEST REVISION: instruction stored, new AI version, QA re-run, approvable again", async () => {
-  const job = await core.requestRevision(admin, actorA, ids.main, "Menciona la limpieza estacional.");
+  const job = await ops.requestRevision(actorA, ids.main, "Menciona la limpieza estacional.");
   assert.equal(job.revision_instruction, "Menciona la limpieza estacional.");
   let article = await admin.collection("articles").getOne(ids.main);
   assert.equal(article.status, "needs_revision");
@@ -537,21 +580,21 @@ test("P4 REQUEST REVISION: instruction stored, new AI version, QA re-run, approv
   const latest = (await list("article_versions", `article = "${ids.main}"`, "-version"))[0];
   assert.equal(latest.change_type, "ai_revision");
   assert.match(latest.change_reason, /Menciona la limpieza/);
-  const approved = await core.approveArticle(admin, actorA, ids.main, { acknowledgeHighRisk: true });
+  const approved = await ops.approveArticle(actorA, ids.main, { acknowledgeHighRisk: true });
   assert.equal(approved.status, "approved");
   assert.ok((await list("activity_logs", `entity_id = "${ids.main}" && action = "REVISION_REQUESTED"`)).length === 1);
 });
 
 test("P4 REJECT: reason required; content kept; approved cannot be rejected", async () => {
-  await assert.rejects(() => core.rejectArticle(admin, actorA, ids.main, "no"), /reason|Phase 4/);
-  await assert.rejects(() => core.rejectArticle(admin, actorA, ids.main, "Not needed anymore"), /Approved content cannot be rejected/);
-  const { article } = await core.startGeneration(admin, actorA, ids.websiteA, { kind: "plan_item", id: ids.planItem }, { content_type: "blog_article", primary_keyword: "plan keyword", language: "es" });
+  await assert.rejects(() => ops.rejectArticle(actorA, ids.main, "no"), /reason|Phase 4/);
+  await assert.rejects(() => ops.rejectArticle(actorA, ids.main, "Not needed anymore"), /Approved content cannot be rejected/);
+  const { article } = await ops.startGeneration(actorA, ids.websiteA, { kind: "plan_item", id: ids.planItem }, { content_type: "blog_article", primary_keyword: "plan keyword", language: "es" });
   const planItem = await admin.collection("content_plan_items").getOne(ids.planItem);
   assert.equal(planItem.status, "in_progress");
   const jobs = await list("content_jobs", `article = "${article.id}"`);
-  await core.cancelJob(admin, actorA, jobs[0].id);
-  await assert.rejects(() => core.rejectArticle(admin, actorA, article.id, ""), /reason is required/);
-  const rejected = await core.rejectArticle(admin, actorA, article.id, "Tema fuera de estrategia");
+  await ops.cancelJob(actorA, jobs[0].id);
+  await assert.rejects(() => ops.rejectArticle(actorA, article.id, ""), /reason is required/);
+  const rejected = await ops.rejectArticle(actorA, article.id, "Tema fuera de estrategia");
   assert.equal(rejected.status, "rejected");
   assert.equal(rejected.rejection_reason, "Tema fuera de estrategia");
   assert.ok(await admin.collection("articles").getOne(article.id), "rejected content remains stored");
@@ -559,7 +602,7 @@ test("P4 REJECT: reason required; content kept; approved cannot be rejected", as
 
 // ================================================================= failure modes
 async function startFor(oppId, extra = {}) {
-  const { article, job } = await core.startGeneration(admin, actorA, ids.websiteA, { kind: "opportunity", id: oppId }, { content_type: "blog_article", primary_keyword: "paneles solares", language: "es", ...extra });
+  const { article, job } = await ops.startGeneration(actorA, ids.websiteA, { kind: "opportunity", id: oppId }, { content_type: "blog_article", primary_keyword: "paneles solares", language: "es", ...extra });
   return { article, job };
 }
 
@@ -577,9 +620,9 @@ test("P4 FAILURE/RETRY: failed draft keeps completed stages; retry continues wit
   assert.ok(a.brief && a.outline && a.research, "completed stages are kept");
   const sourcesBefore = (await list("research_sources", `article = "${article.id}"`)).length;
 
-  const retry = await core.retryGeneration(admin, actorA, article.id);
+  const retry = await ops.retryGeneration(actorA, article.id);
   assert.equal(retry.mode, "continue");
-  const again = await core.retryGeneration(admin, actorA, article.id);
+  const again = await ops.retryGeneration(actorA, article.id);
   assert.equal(again.id, retry.id, "retry is idempotent while queued");
   const run2 = await runJob(retry, { provider: failing });
   assert.equal(run2.error, undefined, run2.error?.stack);
@@ -610,7 +653,7 @@ test("P4 BUDGET: max_ai_calls stops the job safely and retries cannot reset the 
   assert.equal(provider.calls.length, 2);
   const failed = await admin.collection("content_jobs").getOne(job.id);
   assert.equal(failed.error_code, "BUDGET_EXCEEDED");
-  const retry = await core.retryGeneration(admin, actorA, article.id);
+  const retry = await ops.retryGeneration(actorA, article.id);
   const run2 = await runJob(retry, { provider });
   assert.equal(run2.error?.code, "BUDGET_EXCEEDED");
   assert.equal(provider.calls.length, 2, "no extra AI calls after budget exhausted");
@@ -641,11 +684,11 @@ test("P4 REVISION LIMIT: persistent unsupported claims stop after 2 automatic cy
   assert.equal(a.status, "needs_revision");
   assert.equal(stubborn.calls.filter((c) => c.task === "revision").length, 2);
   assert.equal((await list("article_qa_reports", `article = "${article.id}"`)).length, 3);
-  await assert.rejects(() => core.approveArticle(admin, actorA, article.id, { acknowledgeHighRisk: true, acknowledgeWarnings: true }), /NOT_APPROVABLE|awaiting approval|BLOCKED/);
+  await assert.rejects(() => ops.approveArticle(actorA, article.id, { acknowledgeHighRisk: true, acknowledgeWarnings: true }), /NOT_APPROVABLE|awaiting approval|BLOCKED/);
 });
 
 test("P4 LOCATION: page without local evidence is flagged INSUFFICIENT_LOCAL_DIFFERENTIATION and blocked", async () => {
-  const { article, job } = await core.startGeneration(admin, actorA, ids.websiteA, { kind: "opportunity", id: ids.oppLocation }, { content_type: "location_page", primary_keyword: "paneles solares chihuahua", target_location: "Chihuahua", language: "es" });
+  const { article, job } = await ops.startGeneration(actorA, ids.websiteA, { kind: "opportunity", id: ids.oppLocation }, { content_type: "location_page", primary_keyword: "paneles solares chihuahua", target_location: "Chihuahua", language: "es" });
   await admin.collection("content_jobs").update(job.id, { configuration: { max_revision_cycles: 0 } });
   const run = await runJob(await admin.collection("content_jobs").getOne(job.id));
   assert.equal(run.error, undefined, run.error?.stack);

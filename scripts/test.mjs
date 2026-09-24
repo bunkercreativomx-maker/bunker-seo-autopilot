@@ -167,6 +167,10 @@ test("TENANT ISOLATION: user A cannot create a client in org B", async () => {
 
 test("ACTIVITY: activity logs are written and scoped to org", async () => {
   const logs = await userA.collection("activity_logs").getFullList(200);
+  // Regression: this test used to pass with an EMPTY log. The login + client
+  // writes done above must have produced server-side (pb_hooks) entries.
+  assert.ok(logs.length > 0, "activity logging must produce entries (was silently empty before)");
+  assert.ok(logs.some((l) => l.action === "USER_LOGIN"), "login is logged");
   for (const l of logs) {
     assert.equal(l.organization, ids.orgA, "user A must only see org A activity");
   }

@@ -146,8 +146,9 @@ async function main() {
   ], {
     listRule: 'organization.id = @request.auth.organization.id',
     viewRule: 'organization.id = @request.auth.organization.id',
-    createRule: 'organization.id = @request.auth.organization.id && @request.auth.role != "viewer"',
-    updateRule: 'organization.id = @request.auth.organization.id && @request.auth.role != "viewer"',
+    createRule: 'organization.id = @request.auth.organization.id && @request.auth.role != "viewer" && @request.auth.role != "client"',
+    // The tenant of an existing client can never be changed (no org hopping).
+    updateRule: 'organization.id = @request.auth.organization.id && @request.auth.role != "viewer" && @request.auth.role != "client" && @request.body.organization:isset = false',
     deleteRule: null,
   });
 
@@ -169,8 +170,10 @@ async function main() {
   ], {
     listRule: 'organization.id = @request.auth.organization.id',
     viewRule: 'organization.id = @request.auth.organization.id',
-    createRule: 'organization.id = @request.auth.organization.id && @request.auth.role != "viewer"',
-    updateRule: 'organization.id = @request.auth.organization.id && @request.auth.role != "viewer"',
+    // A website must belong to a client of the SAME organization.
+    createRule: 'organization.id = @request.auth.organization.id && client.organization.id = @request.auth.organization.id && @request.auth.role != "viewer" && @request.auth.role != "client"',
+    // Tenant fields are immutable once created (no re-pointing to another org/client).
+    updateRule: 'organization.id = @request.auth.organization.id && @request.auth.role != "viewer" && @request.auth.role != "client" && @request.body.organization:isset = false && @request.body.client:isset = false',
     deleteRule: null,
   });
 
@@ -257,7 +260,9 @@ async function main() {
     // users create jobs (Analyze button); worker updates them (status/progress). Worker is superuser -> bypasses.
     listRule: 'organization.id = @request.auth.organization.id',
     viewRule: 'organization.id = @request.auth.organization.id',
-    createRule: 'organization.id = @request.auth.organization.id && @request.auth.role != "viewer"',
+    // The website/client must belong to the caller's organization and to each
+    // other; the job is always attributed to the caller.
+    createRule: 'organization.id = @request.auth.organization.id && website.organization.id = @request.auth.organization.id && client.id = website.client.id && triggered_by = @request.auth.id && status = "queued" && @request.auth.role != "viewer" && @request.auth.role != "client"',
     updateRule: null, // worker only
     deleteRule: null,
   }, {
@@ -397,7 +402,7 @@ async function main() {
   ], {
     listRule: 'organization.id = @request.auth.organization.id',
     viewRule: 'organization.id = @request.auth.organization.id',
-    createRule: 'organization.id = @request.auth.organization.id && client.organization.id = organization.id && website.organization.id = organization.id && website.client.id = client.id && triggered_by.id = @request.auth.id && status = "queued" && progress = 0 && @request.auth.role != "viewer"',
+    createRule: 'organization.id = @request.auth.organization.id && client.organization.id = organization.id && website.organization.id = organization.id && website.client.id = client.id && triggered_by.id = @request.auth.id && status = "queued" && progress = 0 && @request.auth.role != "viewer" && @request.auth.role != "client"',
     updateRule: null,
     deleteRule: null,
   }, {
@@ -843,8 +848,10 @@ async function main() {
   ]];
   usersCol.listRule = '@request.auth.organization.id = organization.id || @request.auth.id = id';
   usersCol.viewRule = '@request.auth.organization.id = organization.id || @request.auth.id = id';
-  usersCol.createRule = '@request.auth.organization.id != "" && @request.auth.role = "admin"';
-  usersCol.updateRule = '@request.auth.id = id || (@request.auth.organization.id = organization.id && @request.auth.role = "admin")';
+  usersCol.createRule = '@request.auth.organization.id != "" && @request.auth.role = "admin" && @request.body.organization = @request.auth.organization.id';
+  // Self-service profile edits only: organization/role/status changes are
+  // blocked here and re-checked by the users guard in pb_hooks (defense in depth).
+  usersCol.updateRule = '(@request.auth.id = id && @request.body.organization:isset = false && @request.body.role:isset = false && @request.body.status:isset = false) || (@request.auth.organization.id = organization.id && @request.auth.role = "admin" && @request.auth.id != id && @request.body.organization:isset = false)';
   usersCol.deleteRule = null;
   await patchCollection(USERS_COLL, usersCol);
   console.log(`✓ users fields+rules updated (${USERS_COLL})`);

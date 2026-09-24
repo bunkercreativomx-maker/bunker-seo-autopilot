@@ -85,8 +85,12 @@ See `.env.example`:
 |---|---|---|
 | `NEXT_PUBLIC_POCKETBASE_URL` | Public PB URL (browser + server) | No |
 | `POCKETBASE_URL` | Server-side PB URL (optional, falls back) | No |
-| `PB_ADMIN_EMAIL` | Superuser email — server-only (activity logs, org update, user invites) | **Yes** |
-| `PB_ADMIN_PASSWORD` | Superuser password — server-only | **Yes** |
+
+The web app needs **no** PocketBase superuser credentials: it acts with the
+signed-in user's token and PocketBase enforces rules + validated workflows
+(`pb_hooks/`). `PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD` are used only by the
+workers, migrations (`npm run pb:setup`) and local tests — never in Vercel.
+See [docs/AUTH-ARCHITECTURE.md](docs/AUTH-ARCHITECTURE.md).
 
 Never commit `.env.local` or real secrets.
 
@@ -238,7 +242,9 @@ npm run test:seed     # seed test orgs/clients/websites
 ## Deployment Notes
 
 - **Frontend**: push to `main` → Vercel auto-deploys. Set env vars in Vercel
-  (`NEXT_PUBLIC_POCKETBASE_URL` as Config; `PB_ADMIN_EMAIL`/`PB_ADMIN_PASSWORD` as Secrets).
+  (`NEXT_PUBLIC_POCKETBASE_URL` only — no PocketBase credentials).
+- **PocketBase hooks**: mount `pb_hooks/` read-only at `/pb_hooks` in the PocketBase
+  container (production: `/opt/data/scripts/deploy-seo-hooks.py`).
 - **PocketBase**: run a production instance (Docker/Portainer) reachable over HTTPS, point
   `NEXT_PUBLIC_POCKETBASE_URL` at it, and run `npm run pb:setup` against it once.
 
