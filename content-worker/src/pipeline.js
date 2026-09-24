@@ -8,7 +8,7 @@ import { Budget } from "./budget.js";
 import { limitsForJob } from "./config.js";
 import { attachSources, buildContext, evidenceIndex } from "./context.js";
 import {
-  buildStructuredData, checkMetadata, detectRisk, duplicateCheck, enforceClaim, externalLinks, isNonClaimText, keywordStats,
+  buildStructuredData, checkMetadata, classifyQaCheck, classifyQaIssue, currentRisk, duplicateCheck, enforceClaim, externalLinks, isNonClaimText, keywordStats,
   localDifferentiation, processLinks, repetitionStats, sanitizeSlug, scanEditorialLanguage, scanUnsupportedSpecifics, scanUnverifiedBusinessMentions,
   structureStats, summarizeClaims,
 } from "./checks.js";
@@ -88,11 +88,13 @@ function computeQaStatus({ qa, claimSummary, specifics, duplicate, local, struct
   if (local.level === "severe") reasons.push("Insufficient local differentiation");
   if (structure.languageMismatch) reasons.push(`Language mismatch (expected ${structure.expectedLanguage}, got ${structure.detectedLanguage})`);
   if (structure.h1 !== 1) reasons.push(`Expected exactly one H1, found ${structure.h1}`);
-  const qaBlockers = qa.issues.filter((i) => i.severity === "blocker");
+  // Approval eligibility rests on BLOCKERs (factual/policy problems), not on
+  // the numeric score. Advisories and NOT_APPLICABLE suggestions never block.
+  const qaBlockers = qa.issues.filter((i) => i.classification === "BLOCKER");
   if (qaBlockers.length) reasons.push(`${qaBlockers.length} QA blocker(s)`);
   if (reasons.length) return { status: "BLOCKED", reasons };
-  const majors = qa.issues.filter((i) => i.severity === "major").length + specifics.filter((s) => s.severity === "major").length;
-  const failedChecks = qa.checks.filter((c) => c.status === "fail").length;
+  const majors = qa.issues.filter((i) => i.classification === "MAJOR_ADVISORY").length;
+  const failedChecks = qa.checks.filter((c) => c.classification === "BLOCKER" || c.classification === "MAJOR_ADVISORY").length;
   if (majors || failedChecks || claimSummary.unverified || duplicate.level === "warning" || local.level === "warning") {
     return { status: "NEEDS_REVISION", reasons: [majors && `${majors} major issue(s)`, failedChecks && `${failedChecks} failed check(s)`, claimSummary.unverified && `${claimSummary.unverified} unverified claim(s)`, duplicate.level === "warning" && "Partial overlap with existing content", local.level === "warning" && "Limited local evidence"].filter(Boolean) };
   }
@@ -273,8 +275,12 @@ export async function processContentJob(pb, job, deps) {
         excerpt: safeText(metadata.excerpt, 1000), og_title: safeText(metadata.og_title, 200), og_description: safeText(metadata.og_description, 400),
       };
       const structuredData = buildStructuredData({ article, metadata: { ...metaFields }, markdown: content, context, suggestions: metadata.schema_suggestions });
-      await saveState({ ...metaFields, secondary_keywords: article.secondary_keywords?.length ? article.secondary_keywords : metadata.secondary_keywords, structured_data: structuredData });
       const latestVersion = (await pb.collection("article_versions").getList(1, 1, { filter: `article = "${esc(article.id)}"`, sort: "-version" })).items[0];
+      // A human-edited/restored version keeps its own metadata; a recheck never overwrites it.
+      if (latestVersion && latestVersion.version === article.current_version && (latestVersion.change_type === "manual_edit" || latestVersion.change_type === "restore")) {
+        for (const field of ["seo_title", "meta_description", "slug", "excerpt"]) if (latestVersion[field]) metaFields[field] = latestVersion[field];
+      }
+      await saveState({ ...metaFields, secondary_keywords: article.secondary_keywords?.length ? article.secondary_keywords : metadata.secondary_keywords, structured_data: structuredData });
       if (latestVersion && latestVersion.version === article.current_version && latestVersion.change_type !== "manual_edit" && latestVersion.change_type !== "restore") {
         await pb.collection("article_versions").update(latestVersion.id, { seo_title: metaFields.seo_title, meta_description: metaFields.meta_description, slug, excerpt: metaFields.excerpt });
       }
@@ -308,7 +314,9 @@ export async function processContentJob(pb, job, deps) {
       const unverifiedMentions = scanUnverifiedBusinessMentions(content, context);
       const commercial = ["service_page", "location_page", "existing_page_optimization"].includes(article.content_type);
       const outbound = commercial ? externalLinks(content, context.meta.website_domain) : [];
-      const risk = detectRisk([content, context.meta.primary_keyword], [...(research.risk_categories || []), ...claims.filter((c) => ["medical", "legal", "financial"].includes(c.claim_type)).map((c) => c.claim_type)]);
+      // High-risk reflects the CURRENT version's claims and copy; the
+      // research-stage topic categories are kept separately for audit.
+      const risk = currentRisk(content, claims);
 
       await progress("quality_review");
       const structure = structureStats(content, context);
@@ -333,7 +341,9 @@ export async function processContentJob(pb, job, deps) {
         ...(structure.languageMismatch ? [{ severity: "blocker", check: "grammar", description: `Language mismatch: expected ${structure.expectedLanguage}, detected ${structure.detectedLanguage}`, fix: `Rewrite in ${structure.expectedLanguage}.` }] : []),
         ...repetition.repeated.map((r) => ({ severity: "minor", check: "repetition", description: `Repeated sentence (${r.count}×): ${r.sentence}`, fix: "Remove repetition." })),
       ];
-      const allIssues = [...qa.issues, ...detIssues];
+      const allIssues = [...qa.issues.map((i) => ({ ...i, origin: "reviewer" })), ...detIssues.map((i) => ({ ...i, origin: "deterministic" }))]
+        .map((i) => ({ ...i, classification: classifyQaIssue(i, context) }));
+      qa.checks = (qa.checks || []).map((c) => ({ ...c, classification: classifyQaCheck(c, context) }));
       const verdict = computeQaStatus({ qa: { ...qa, issues: allIssues }, claimSummary, specifics, duplicate, local, structure, editorial, unverifiedMentions });
       const flags = new Set((article.flags || []).filter((f) => !["POTENTIAL_DUPLICATE_CONTENT", "INSUFFICIENT_LOCAL_DIFFERENTIATION", "HIGH_RISK_REVIEW_REQUIRED", "UNSUPPORTED_BUSINESS_CLAIM", "LANGUAGE_MISMATCH"].includes(f)));
       if (duplicate.level !== "none") flags.add("POTENTIAL_DUPLICATE_CONTENT");
@@ -350,7 +360,7 @@ export async function processContentJob(pb, job, deps) {
       await saveState({
         qa_status: verdict.status, qa_score: qa.score, qa_summary: summary, fact_check_status: claimSummary.status,
         flags: [...flags], high_risk: risk.high_risk, risk_categories: risk.categories,
-        provenance: { ...(article.provenance || {}), high_risk: risk.high_risk, auto_publish_allowed: false, last_checked_at: now(), last_checked_version: article.current_version },
+        provenance: { ...(article.provenance || {}), high_risk: risk.high_risk, high_risk_claims: risk.high_risk_claims, research_risk_categories: research.risk_categories || [], auto_publish_allowed: false, last_checked_at: now(), last_checked_version: article.current_version },
       });
 
       if (verdict.status === "PASS") {
@@ -367,7 +377,7 @@ export async function processContentJob(pb, job, deps) {
       cycle++;
       await progress("revising");
       const required = [
-        ...allIssues.filter((i) => i.severity !== "minor").slice(0, 20),
+        ...allIssues.filter((i) => i.classification === "BLOCKER" || i.classification === "MAJOR_ADVISORY").slice(0, 20),
         ...claims.filter((c) => c.action === "remove" || c.action === "rewrite").map((c) => ({ severity: "claim", description: `${c.action.toUpperCase()}: "${c.claim}"`, fix: c.suggested_rewrite || "" })),
       ];
       const revised = await runRevision(ctx, context, { brief: article.brief, outline: article.outline, content, issues: required });
@@ -391,4 +401,49 @@ export async function processContentJob(pb, job, deps) {
     }
     throw error;
   }
+}
+
+
+/**
+ * Deterministic reassessment of the CURRENT version (no AI calls, no copy,
+ * metadata or claim changes): recompute the high-risk flag from the stored
+ * claims + copy and reclassify the latest QA report's issues. Appends a new
+ * QA report (history is kept) and updates the article's QA/risk fields.
+ * Never changes the article status except BLOCKED→needs_revision safety.
+ */
+export async function reassessArticle(pb, articleId, { now = () => new Date().toISOString(), actor = "" } = {}) {
+  const article = await pb.collection("articles").getOne(articleId);
+  const data = await loadJobData(pb, { article: article.id, organization: article.organization, client: article.client, website: article.website });
+  const context = buildContext(data);
+  const version = article.current_version;
+  const claims = await pb.collection("article_claims").getFullList({ filter: `article = "${esc(article.id)}" && version = ${Number(version)}` });
+  if (!claims.length) throw new Error(`No claims stored for current version v${version}; run a recheck first.`);
+  const last = (await pb.collection("article_qa_reports").getList(1, 1, { filter: `article = "${esc(article.id)}" && version = ${Number(version)}`, sort: "-created_at" })).items[0];
+  if (!last) throw new Error(`No QA report for current version v${version}; run a recheck first.`);
+  const issues = (last.issues || []).map((i) => ({ ...i, classification: classifyQaIssue(i, context) }));
+  const checks = (last.checks || []).map((c) => ({ ...c, classification: classifyQaCheck(c, context) }));
+  const blocking = claims.filter((c) => c.verification_status === "CONTRADICTED" || (c.verification_status === "UNVERIFIED" && c.risk_level === "high")).length;
+  const unverified = claims.filter((c) => c.verification_status === "UNVERIFIED").length;
+  const counts = Object.fromEntries(["BLOCKER", "MAJOR_ADVISORY", "MINOR_ADVISORY", "NOT_APPLICABLE"].map((k) => [k, issues.filter((i) => i.classification === k).length]));
+  const blockerChecks = checks.filter((c) => c.classification === "BLOCKER").length;
+  const status = blocking || counts.BLOCKER || blockerChecks ? "BLOCKED"
+    : counts.MAJOR_ADVISORY || checks.some((c) => c.classification === "MAJOR_ADVISORY") || unverified ? "NEEDS_REVISION" : "PASS";
+  const risk = currentRisk(article.content, claims);
+  const flags = new Set((article.flags || []).filter((f) => f !== "HIGH_RISK_REVIEW_REQUIRED"));
+  if (risk.high_risk) flags.add("HIGH_RISK_REVIEW_REQUIRED");
+  if (!claims.some((c) => ["business", "product"].includes(c.claim_type) && c.verification_status === "UNVERIFIED")) flags.delete("UNSUPPORTED_BUSINESS_CLAIM");
+  const summary = [`${status} — deterministic reassessment of v${version} (no AI, copy unchanged): ${counts.BLOCKER} blocker, ${counts.MAJOR_ADVISORY} major advisory, ${counts.MINOR_ADVISORY} minor advisory, ${counts.NOT_APPLICABLE} not applicable; high_risk=${risk.high_risk}`, safeText(last.summary, 900)].join(" — ");
+  await pb.collection("article_qa_reports").create({
+    organization: article.organization, client: article.client, website: article.website, article: article.id,
+    version, cycle: last.cycle, status, score: last.score, checks, issues, flags: [...flags], summary, created_at: now(),
+  });
+  const fields = {
+    qa_status: status, qa_summary: summary, fact_check_status: blocking ? "blocked" : unverified ? "issues" : "passed",
+    flags: [...flags], high_risk: risk.high_risk, risk_categories: risk.categories,
+    provenance: { ...(article.provenance || {}), high_risk: risk.high_risk, high_risk_claims: risk.high_risk_claims, previous_high_risk: article.high_risk, previous_risk_categories: article.risk_categories || [], last_reassessed_at: now(), last_reassessed_version: version },
+  };
+  if (status === "BLOCKED" && article.status === "awaiting_approval") fields.status = "needs_revision";
+  const updated = await updateArticle(pb, article.id, fields);
+  await logActivity(pb, { article, action: "QA_REASSESSED", user: actor, metadata: { version, status, counts, high_risk: { from: Boolean(article.high_risk), to: risk.high_risk } } });
+  return { status, counts, high_risk: risk.high_risk, categories: risk.categories, article_status: updated.status, fact_check_status: fields.fact_check_status, flags: [...flags] };
 }

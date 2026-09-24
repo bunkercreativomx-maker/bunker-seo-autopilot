@@ -19,7 +19,7 @@ import PocketBase from "pocketbase";
 import { randomUUID } from "node:crypto";
 import { assertLocalTarget } from "./lib/local-only.mjs";
 import * as core from "../src/lib/content/core.ts";
-import { processContentJob } from "../content-worker/src/pipeline.js";
+import { processContentJob, reassessArticle } from "../content-worker/src/pipeline.js";
 import { loadContentConfig } from "../content-worker/src/config.js";
 import { fetchSource, NullResearchProvider } from "../content-worker/src/research.js";
 import { AIProviderError } from "../content-worker/src/ai-provider.js";
@@ -750,4 +750,66 @@ test("P4 NO PUBLISH: nothing in Phase 4 has a published state or publishing side
   const all = await list("articles", `organization = "${ids.orgA}"`);
   assert.ok(all.every((a) => a.status !== "published"));
   assert.ok(all.every((a) => !a.provenance || a.provenance.auto_publish_allowed !== true));
+});
+
+
+test("P4 CLOSEOUT: manual edit → recheck keeps manual metadata, clears stale high-risk, advisories never block; reassess is copy-preserving", async () => {
+  const art = (await list("articles", `content_opportunity = "${ids.oppLoop}"`))[0];
+  assert.ok(art, "loop article exists");
+  assert.ok(["awaiting_approval", "needs_revision", "draft"].includes(art.status), `unexpected status ${art.status}`);
+  const clean = "# Instalación de paneles solares en Ciudad Juárez\n\nInstalamos sistemas solares en tu hogar. Los paneles convierten la luz del sol en electricidad y el inversor la transforma en corriente alterna.\n\n## Contacto\n\nEscríbenos para solicitar tu cotización.";
+  const meta = { seo_title: "Instalación de paneles solares en Juárez", meta_description: "Instalamos sistemas solares en Ciudad Juárez. Solicita tu cotización.", excerpt: "Instalamos sistemas solares.", slug: "paneles-solares-juarez-manual" };
+  const edited = await ops.saveManualEdit(actorA, art.id, { content: clean, ...meta }, "Human edit");
+  const manualVersion = edited.version;
+  const provider = makeProvider({
+    claim_extraction: () => ({ claims: [
+      { claim: "Los paneles convierten la luz del sol en electricidad", claim_type: "product", business_specific: false, sensitive_topic: "none" },
+      { claim: "Conócenos", claim_type: "business", business_specific: true, sensitive_topic: "none" },
+    ] }),
+    fact_check: ({ ev }) => ({ results: ev.claims.map((c) => ({ claim_index: c.index, verification_status: "NOT_REQUIRED", evidence_ids: [], risk_level: "low", action: "approve", notes: "", suggested_rewrite: "" })) }),
+    qa: () => ({
+      checks: [{ check: "usefulness", status: "fail", details: "Contenido demasiado breve (40 palabras); no cumple el rango recomendado (700–1200)." }, { check: "factual_consistency", status: "pass", details: "ok" }],
+      issues: [
+        { severity: "blocker", check: "usefulness", description: "La página es demasiado corta (40 palabras) y no alcanza el mínimo de 700 palabras.", fix: "Ampliar." },
+        { severity: "blocker", check: "structure", description: "Faltan secciones: Opciones de pago y garantías, Gestión con CFE, Casos ilustrativos.", fix: "Agregar." },
+        { severity: "major", check: "cta", description: "La CTA es débil.", fix: "Hacerla más concreta." },
+      ],
+      summary: "Corta.", score: 55,
+    }),
+  });
+  const job = await ops.requestRecheck(actorA, art.id);
+  const { error } = await runJob(job, { provider });
+  assert.equal(error, undefined, error?.stack);
+  let a = await admin.collection("articles").getOne(art.id);
+  assert.equal(a.current_version, manualVersion, "recheck creates no version");
+  assert.equal(a.content, clean, "recheck never changes copy");
+  for (const [k, v] of Object.entries(meta)) assert.equal(a[k], v, `manual ${k} preserved`);
+  assert.equal(a.status, "awaiting_approval", "advisories/NOT_APPLICABLE do not block");
+  assert.notEqual(a.qa_status, "BLOCKED");
+  assert.equal(a.fact_check_status, "passed");
+  assert.equal(a.high_risk, false, "current all-low claims + clean copy clear the flag");
+  assert.ok(!(a.flags || []).includes("HIGH_RISK_REVIEW_REQUIRED"));
+  const report = (await list("article_qa_reports", `article = "${art.id}"`, "-created_at"))[0];
+  const cls = Object.fromEntries(report.issues.filter((i) => i.origin === "reviewer").map((i) => [i.check, i.classification]));
+  assert.equal(cls.usefulness, "MINOR_ADVISORY", "word count is advisory");
+  assert.equal(cls.structure, "NOT_APPLICABLE", "requests for unverified evidence are not applicable");
+  assert.equal(cls.cta, "MAJOR_ADVISORY");
+  const claims = await list("article_claims", `article = "${art.id}" && version = ${manualVersion}`);
+  assert.ok(!claims.some((c) => c.claim === "Conócenos"), "navigation label not stored as a claim");
+  assert.equal(a.status, "awaiting_approval");
+  assert.notEqual(a.approved_by, ids.userA, "never auto-approved");
+
+  // Deterministic reassessment: no AI, no copy/claim/version change, history kept.
+  const reportsBefore = (await list("article_qa_reports", `article = "${art.id}"`)).length;
+  const claimsBefore = claims.map((c) => c.id).sort();
+  const r = await reassessArticle(admin, art.id);
+  a = await admin.collection("articles").getOne(art.id);
+  assert.equal(r.high_risk, false);
+  assert.equal(a.content, clean);
+  assert.equal(a.current_version, manualVersion);
+  assert.equal(a.status, "awaiting_approval");
+  assert.deepEqual((await list("article_claims", `article = "${art.id}" && version = ${manualVersion}`)).map((c) => c.id).sort(), claimsBefore);
+  assert.equal((await list("article_qa_reports", `article = "${art.id}"`)).length, reportsBefore + 1, "old reports kept");
+  const approved = await ops.approveArticle(actorA, art.id, { acknowledgeWarnings: true });
+  assert.equal(approved.status, "approved", "no high-risk acknowledgement needed once the flag is cleared");
 });

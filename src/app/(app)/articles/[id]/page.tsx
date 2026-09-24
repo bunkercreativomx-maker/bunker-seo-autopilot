@@ -395,7 +395,7 @@ export default async function ArticlePage({ params, searchParams }: { params: Pr
                 <div>
                   <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Actionable issues</p>
                   {(report.issues ?? []).length === 0 ? <p className="text-sm text-slate-500">None.</p> : (
-                    <ul className="space-y-2 text-sm">{(report.issues ?? []).map((i, j) => <li key={j} className="rounded border border-slate-200 p-2"><Badge tone={i.severity === "blocker" ? "red" : i.severity === "major" ? "amber" : "slate"}>{i.severity}</Badge> <span className="text-xs text-slate-500">{i.check}</span><p className="mt-1">{i.description}</p>{i.fix && <p className="text-xs text-slate-500">Fix: {i.fix}</p>}</li>)}</ul>
+                    <ul className="space-y-2 text-sm">{(report.issues ?? []).map((i, j) => <li key={j} className="rounded border border-slate-200 p-2"><Badge tone={(i.classification ?? i.severity) === "BLOCKER" || (!i.classification && i.severity === "blocker") ? "red" : i.classification === "NOT_APPLICABLE" ? "slate" : (i.classification === "MAJOR_ADVISORY" || (!i.classification && i.severity === "major")) ? "amber" : "slate"}>{i.classification ?? i.severity}</Badge> <span className="text-xs text-slate-500">{i.check}</span><p className="mt-1">{i.description}</p>{i.fix && <p className="text-xs text-slate-500">Fix: {i.fix}</p>}</li>)}</ul>
                   )}
                   {(report.flags ?? []).length > 0 && <p className="mt-2 text-xs text-amber-700">Flags: {(report.flags ?? []).join(", ")}</p>}
                 </div>
