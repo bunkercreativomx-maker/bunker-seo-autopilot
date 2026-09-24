@@ -171,6 +171,8 @@ const POLICY_REQUESTS = [
   /\b(ahorro (promedio|estimado)|retorno|roi|payback|rangos? de (costo|precio)|precios?)\b/i,
   /\b(recibo( de (cfe|luz|electricidad))?|diagn[oó]stico|visita t[eé]cnica|agendar)\b/i,
 ];
+// Pure editorial checks: always a real (non-blocking) advisory, never "not applicable".
+const EDITORIAL_ONLY_CHECKS = new Set(["repetition", "readability", "seo_metadata", "brand_consistency", "keyword_stuffing"]);
 const WORD_COUNT = /(\b\d{3,4}\s*(palabras|words)\b|demasiado (corta|breve)|too (short|thin)|word count|longitud m[ií]nima|minimum length)/i;
 
 /**
@@ -182,22 +184,24 @@ const WORD_COUNT = /(\b\d{3,4}\s*(palabras|words)\b|demasiado (corta|breve)|too 
 export function classifyQaIssue(issue, context) {
   const sev = issue.severity;
   if (issue.origin === "deterministic") return sev === "blocker" ? "BLOCKER" : sev === "major" ? "MAJOR_ADVISORY" : "MINOR_ADVISORY";
-  const text = `${issue.description || ""} ${issue.fix || ""}`;
+  // Classify on what the reviewer found (description); the suggested fix is ignored.
+  const text = String(issue.description || "");
   if (FACTUAL_CHECKS.has(issue.check)) return sev === "blocker" ? "BLOCKER" : sev === "major" ? "MAJOR_ADVISORY" : "MINOR_ADVISORY";
+  if (WORD_COUNT.test(text)) return "MINOR_ADVISORY";
+  if (EDITORIAL_ONLY_CHECKS.has(issue.check)) return sev === "minor" ? "MINOR_ADVISORY" : "MAJOR_ADVISORY";
   const verified = context?.verified_facts || [];
   const verifiedText = verified.map((f) => `${f.label} ${f.value}`).join(" ");
   const verifiedTopics = new Set([...verified.map((f) => FACT_TYPE_TOPIC[f.type]), ...topicsIn(verifiedText)].filter(Boolean));
   if (topicsIn(text).some((t) => !verifiedTopics.has(t))) return "NOT_APPLICABLE";
   if (POLICY_REQUESTS.some((re) => re.test(text))) return "NOT_APPLICABLE";
   if (issue.check === "internal_links" && (context?.internal_link_candidates || []).length <= 1) return "NOT_APPLICABLE";
-  if (WORD_COUNT.test(text)) return "MINOR_ADVISORY";
   // Non-factual reviewer findings never block approval on their own.
   return sev === "minor" ? "MINOR_ADVISORY" : "MAJOR_ADVISORY";
 }
 
 export function classifyQaCheck(check, context) {
   if (check.status !== "fail") return check.status === "warning" ? "MINOR_ADVISORY" : "PASS";
-  return classifyQaIssue({ severity: FACTUAL_CHECKS.has(check.check) ? "blocker" : "major", check: check.check, description: check.details }, context);
+  return classifyQaIssue({ severity: FACTUAL_CHECKS.has(check.check) ? "blocker" : check.check === "repetition" ? "minor" : "major", check: check.check, description: check.details }, context);
 }
 
 /**

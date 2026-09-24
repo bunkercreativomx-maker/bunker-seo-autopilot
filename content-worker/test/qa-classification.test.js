@@ -63,6 +63,9 @@ test("factual problems stay BLOCKER; editorial reviewer findings are advisories;
   assert.equal(classifyQaIssue({ severity: "minor", check: "readability", description: "Frases largas", origin: "reviewer" }, ctx), "MINOR_ADVISORY");
   assert.equal(classifyQaIssue({ severity: "blocker", check: "unsupported_claims", description: "UNVERIFIED_BUSINESS_TOPIC (warranty): …", origin: "deterministic" }, ctx), "BLOCKER");
   assert.equal(classifyQaIssue({ severity: "minor", check: "repetition", description: "Repeated sentence (2×)", origin: "deterministic" }, ctx), "MINOR_ADVISORY");
+  // a genuine editorial finding stays an advisory even if its suggested fix mentions an unverified topic
+  assert.equal(classifyQaIssue({ severity: "major", check: "repetition", description: "La misma línea de contacto está duplicada.", fix: "Pide el recibo de CFE para agendar diagnóstico", origin: "reviewer" }, ctx), "MAJOR_ADVISORY");
+  assert.equal(classifyQaIssue({ severity: "major", check: "usefulness", description: "La página es demasiado corta (263 palabras).", fix: "Agrega casos ilustrativos y opciones de pago", origin: "reviewer" }, ctx), "MINOR_ADVISORY");
   assert.equal(classifyQaCheck({ check: "factual_consistency", status: "fail", details: "contradiction" }, ctx), "BLOCKER");
   assert.equal(classifyQaCheck({ check: "factual_consistency", status: "pass", details: "" }, ctx), "PASS");
   assert.deepEqual(QA_CLASSIFICATIONS, ["BLOCKER", "MAJOR_ADVISORY", "MINOR_ADVISORY", "NOT_APPLICABLE"]);
