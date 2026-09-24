@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { sign, verify, memoryNonceStore, HEADERS } from "../src/signing.js";
 import { encrypt, decrypt, secretsOf } from "../src/secrets.js";
 import { checkDestination, PublishError } from "../src/net.js";
-import { markdownToSafeHtml, jsonLdString, sanitizeSchema, snapshotHash, stableStringify, publicPayload, canonicalFor } from "../src/content.js";
+import { publicSchemaFor, markdownToSafeHtml, jsonLdString, sanitizeSchema, snapshotHash, stableStringify, publicPayload, canonicalFor } from "../src/content.js";
 import { lockedSnapshot } from "../src/engine.js";
 
 const SECRET = "s3cret-for-tests-0123456789";
@@ -132,4 +132,22 @@ test("version lock: changed content after approval requires re-approval", () => 
 test("PublishError carries safe code", () => {
   const e = new PublishError("X", "m", { retryable: true });
   assert.equal(e.code, "X"); assert.equal(e.retryable, true);
+});
+
+test("public schema: Phase 4 [{type,reason,jsonld}] is unwrapped, reason never published, url bound to public URL", () => {
+  const phase4 = [
+    { type: "Service", reason: "INTERNAL rationale from the AI", jsonld: { "@context": "https://schema.org", "@type": "Service", name: "Instalación", url: "https://client.example/other-page", provider: { "@type": "Organization", name: "Tlaloc", url: "https://client.example" } } },
+    { type: "Bogus", reason: "x", jsonld: { "@type": "Evil", name: "<script>alert(1)</script>" } },
+  ];
+  const s = publicSchemaFor(phase4, "https://staging.example/blog/x");
+  const json = JSON.stringify(s);
+  assert.equal(s["@type"], "Service");
+  assert.equal(s.url, "https://staging.example/blog/x");
+  assert.equal(s.provider.url, "https://client.example", "organization facts are not rewritten");
+  assert.ok(!json.includes("INTERNAL rationale"));
+  assert.ok(!json.includes("reason"));
+  assert.ok(!json.includes("Evil"));
+  assert.ok(!jsonLdString(s).includes("</script"));
+  assert.equal(publicSchemaFor(null, "https://x"), null);
+  assert.equal(publicSchemaFor([{ type: "Service", reason: "r" }], "https://x"), null);
 });

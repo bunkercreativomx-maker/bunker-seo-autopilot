@@ -487,6 +487,34 @@ test("unpublish: URL 404, sitemap and public API exclude it, history kept", asyn
   assert.ok(acts.includes("ARTICLE_UNPUBLISHED"));
 });
 
+test("republish after unpublish: same URL/remote id, approved version only, re-approval still enforced", async () => {
+  const before = await admin.collection("articles").getOne(ids.a1);
+  const prev = await op("admin", "preview", { articleId: ids.a1 });
+  assert.equal(prev.operation, "republish");
+  assert.deepEqual(prev.blockers, []);
+  await rejects(op("admin", "publish", { articleId: ids.a1, confirm: true, operation: "publish" }), "INVALID_STATE");
+  const r = await op("admin", "publish", { articleId: ids.a1, confirm: true, operation: "republish" });
+  assert.equal(r.operation, "republish");
+  const out = await runWorker(2);
+  assert.equal(out[0].status, "published", JSON.stringify(out));
+  assert.equal((await fetch(`${SITE}/cms/${ids.wCms}/blog/solo-aprobado`)).status, 200);
+  const xml = await (await fetch(`${SITE}/cms/${ids.wCms}/sitemap.xml`)).text();
+  assert.ok(xml.includes("solo-aprobado"));
+  const pubs = await admin.collection("article_publications").getFullList({ filter: `article = "${ids.a1}"` });
+  assert.equal(pubs.length, 1, "no second publication record");
+  assert.equal(pubs[0].status, "published");
+  assert.equal(pubs[0].article_version, before.approved_version, "republishes the approved version");
+  assert.equal((await admin.collection("published_content").getFullList({ filter: `article = "${ids.a1}"` })).length, 1, "same remote row");
+  // unpublish again, then an edit resets approval: republish must be refused
+  await op("admin", "unpublish", { articleId: ids.a1, confirm: true });
+  assert.equal((await runWorker(2))[0].status, "unpublished");
+  const a = await admin.collection("articles").getOne(ids.a1);
+  await admin.collection("articles").update(ids.a1, { status: "draft" });
+  const p2 = await op("admin", "preview", { articleId: ids.a1 });
+  assert.ok(p2.blockers.some((b) => /only approved content/.test(b)));
+  await admin.collection("articles").update(ids.a1, { status: a.status });
+});
+
 test("Next.js API publisher: signed publish, remote_id + returned URL, verify", async () => {
   const a = await mkArticle(ids.wNext, ids.cA, ids.orgA, "next-articulo");
   await approve("editor", a.id);

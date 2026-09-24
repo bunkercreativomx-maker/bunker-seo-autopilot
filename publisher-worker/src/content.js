@@ -55,7 +55,7 @@ export function publicPayload(snapshot, website, { url, publishedAt, updatedAt, 
     canonical_url: canonicalFor(snapshot, website, url),
     og_title: snapshot.og_title || snapshot.seo_title || snapshot.title,
     og_description: snapshot.og_description || snapshot.meta_description,
-    schema: sanitizeSchema(snapshot.structured_data),
+    schema: publicSchemaFor(snapshot.structured_data, canonicalFor(snapshot, website, url)),
     language: snapshot.language,
     content_type: snapshot.content_type,
     published_at: publishedAt,
@@ -67,6 +67,40 @@ export function publicPayload(snapshot, website, { url, publishedAt, updatedAt, 
   };
 }
 
+export const SCHEMA_TYPES = ["Article", "BlogPosting", "Service", "BreadcrumbList", "FAQPage", "LocalBusiness", "Organization", "WebPage", "HowTo"];
+
+/**
+ * Public JSON-LD from the APPROVED structured data. Phase 4 stores
+ * suggestions as [{ type, reason, jsonld }]: only the `jsonld` object is
+ * public; the AI `reason` (internal rationale) never leaves the platform.
+ * Only known schema.org types are kept. The main entity's url/@id is bound
+ * to the verified public URL (same rule as canonical) so it never points to
+ * a different page or domain; no other field is generated or altered.
+ */
+export function publicSchemaFor(structured, publicUrl) {
+  if (!structured) return null;
+  const list = Array.isArray(structured) ? structured : [structured];
+  const out = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const ld = item.jsonld && typeof item.jsonld === "object" ? item.jsonld : ("@type" in item ? item : null);
+    const nodes = ld && Array.isArray(ld["@graph"]) ? ld["@graph"] : ld ? [ld] : [];
+    for (const n of nodes) {
+      const clean = sanitizeSchema(n);
+      if (!clean || typeof clean !== "object" || !SCHEMA_TYPES.includes(String(clean["@type"]))) continue;
+      delete clean.reason;
+      delete clean["@context"];
+      if (publicUrl && clean["@type"] !== "BreadcrumbList" && clean["@type"] !== "Organization" && clean["@type"] !== "LocalBusiness") {
+        if ("url" in clean || out.length === 0) clean.url = publicUrl;
+        if ("@id" in clean) clean["@id"] = publicUrl;
+      }
+      out.push(clean);
+    }
+  }
+  if (!out.length) return null;
+  return out.length === 1 ? { "@context": "https://schema.org", ...out[0] } : { "@context": "https://schema.org", "@graph": out };
+}
+
 /** Keep only JSON data (no functions); drop keys that look internal. */
 export function sanitizeSchema(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -75,7 +109,7 @@ export function sanitizeSchema(value) {
     if (Array.isArray(v)) return v.slice(0, 200).map((x) => walk(x, depth + 1));
     if (v && typeof v === "object") {
       const out = {};
-      for (const [k, x] of Object.entries(v)) { if (/^_|^(internal|claims?|research|qa|notes?|ai_usage|cost|facts?)$/i.test(k)) continue; out[k] = walk(x, depth + 1); }
+      for (const [k, x] of Object.entries(v)) { if (/^_|^(internal|claims?|research|qa|notes?|ai_usage|cost|facts?|reason|evidence_ids?)$/i.test(k)) continue; out[k] = walk(x, depth + 1); }
       return out;
     }
     if (typeof v === "string") return v.slice(0, 5000);

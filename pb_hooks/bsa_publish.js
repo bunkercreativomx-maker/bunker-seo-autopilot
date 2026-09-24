@@ -276,7 +276,10 @@ function blockersFor(article, website, integration, operation) {
   const b = [];
   const flags = article.flags || [];
   if (operation === "publish" || operation === "update" || operation === "republish") {
-    if (article.status !== "approved" && article.status !== "publish_failed") b.push("Article status is " + article.status + "; only approved content can be published.");
+    // An unpublished article may be republished only if its human approval is
+    // still intact (same version + hash checks below); any edit resets it.
+    const statusOk = article.status === "approved" || article.status === "publish_failed" || (operation === "republish" && article.status === "unpublished");
+    if (!statusOk) b.push("Article status is " + article.status + "; only approved content can be published.");
     if (!article.approved_by || !article.approved_at) b.push("The article has no recorded human approval.");
     if (!article.approved_hash || !article.approved_snapshot) b.push("No approved version snapshot exists; approve the article again.");
     else {
