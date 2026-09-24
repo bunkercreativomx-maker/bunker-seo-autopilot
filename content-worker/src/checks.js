@@ -35,6 +35,13 @@ export function enforceClaim(claim, proposal, evidence) {
   if (contradicted) {
     status = "CONTRADICTED";
     risk = "high";
+  } else if (proposal?.verification_status === "NOT_REQUIRED" && isStableGeneralKnowledge(claim)) {
+    // Stable, textbook technical/general knowledge (e.g. "panels produce DC",
+    // "an inverter converts DC to AC"). The code gate never allows it for
+    // business-specific, statistical, financial, legal, medical or sensitive
+    // claims, nor for anything containing numbers.
+    status = "NOT_REQUIRED";
+    risk = "low";
   } else if (business) {
     if (categories.has("verified_fact")) {
       status = "VERIFIED";
@@ -56,9 +63,6 @@ export function enforceClaim(claim, proposal, evidence) {
     risk = highRiskTopic ? "medium" : "low";
     sourceId = known.find((id) => evidence.get(id).category === "external");
     source = "research_source";
-  } else if (proposal?.verification_status === "NOT_REQUIRED" && !highRiskTopic && claim.claim_type === "general") {
-    status = "NOT_REQUIRED";
-    risk = "low";
   } else {
     status = "UNVERIFIED";
     risk = highRiskTopic ? "high" : "medium";
@@ -82,6 +86,18 @@ export function enforceClaim(claim, proposal, evidence) {
     suggested_rewrite: proposal?.suggested_rewrite || "",
     notes: notes.filter(Boolean).join(" ").slice(0, 2000),
   };
+}
+
+const STABLE_KNOWLEDGE_TYPES = new Set(["general", "product", "external"]);
+const VOLATILE_TOPICS = new Set(["price", "financing", "warranty", "certification", "guarantee", "promotion", "availability", "contact", "credential", "statistic", "medical", "legal"]);
+
+/** Deterministic gate for NOT_REQUIRED: the model may propose it, code decides whether it is allowed. */
+export function isStableGeneralKnowledge(claim) {
+  if (!claim || claim.business_specific) return false;
+  if (!STABLE_KNOWLEDGE_TYPES.has(claim.claim_type)) return false;
+  if (VOLATILE_TOPICS.has(claim.sensitive_topic || "none")) return false;
+  if (/\d/.test(String(claim.claim || ""))) return false; // numbers/years/percentages always need a source
+  return true;
 }
 
 export function summarizeClaims(claims) {
@@ -128,6 +144,37 @@ export function scanUnsupportedSpecifics(markdown, context) {
   }
   for (const match of text.matchAll(QUOTE_ATTRIBUTION)) findings.push({ code: "POSSIBLE_FAKE_QUOTE", severity: "major", value: match[0].slice(0, 120) });
   return findings;
+}
+
+// Editorial/meta language that must never appear in public copy: notes to the
+// editor, and warnings to the reader about the client's own claims.
+const EDITORIAL_PATTERNS = [
+  { code: "EDITORIAL_NOTE_IN_COPY", re: /\b(nota (para el )?(editor|redactor|revisor)|note to (the )?editor|editor'?s note|TODO|TBD|placeholder|lorem ipsum)\b/i },
+  { code: "EDITORIAL_NOTE_IN_COPY", re: /\b(formulario sugerido|campos? m[ií]nimos?|suggested form|minimum fields)\b/i },
+  { code: "EDITORIAL_NOTE_IN_COPY", re: /\b(este (texto|documento|borrador|contenido) (las )?presenta|this (draft|document|text) presents)\b/i },
+  { code: "EDITORIAL_NOTE_IN_COPY", re: /(sujet[oa]s? a verificaci[oó]n|pendiente de verificar|subject to verification|to be (verified|confirmed))/i },
+  { code: "READER_WARNING_ABOUT_CLIENT", re: /(declaraci[oó]n(es)? del proveedor|seg[uú]n (la )?(declaraci[oó]n|comunicaci[oó]n) (del proveedor|de la empresa)|comunicaci[oó]n p[uú]blica de la empresa|la empresa (menciona|afirma|declara|indica|comunica|reporta)|provider'?s claims?|the (company|provider) (claims|states|says))/i },
+  { code: "READER_WARNING_ABOUT_CLIENT", re: /\b(exige|solicita|pide) (los |las )?(documentos|evidencias|pruebas|constancias|p[oó]lizas)\b[^.\n]{0,80}(antes de (contratar|decidir|acudir)|que prueben)/i },
+  { code: "READER_WARNING_ABOUT_CLIENT", re: /\b(verifica|confirma)[^.\n]{0,40}antes de (acudir|contratar|visitar)/i },
+  { code: "READER_WARNING_ABOUT_CLIENT", re: /se[nñ]ales de confianza que debes solicitar/i },
+];
+
+/** Deterministic scan for editorial notes and reader warnings about the client in public copy. */
+export function scanEditorialLanguage(markdown) {
+  const findings = [];
+  for (const line of String(markdown || "").split("\n")) {
+    for (const { code, re } of EDITORIAL_PATTERNS) {
+      if (re.test(line)) { findings.push({ code, severity: "blocker", value: line.trim().slice(0, 160) }); break; }
+    }
+  }
+  return findings;
+}
+
+/** External (non-client) URLs present in the public copy. */
+export function externalLinks(markdown, domain) {
+  const host = String(domain || "").toLowerCase().replace(/^www\./, "");
+  const urls = [...String(markdown || "").matchAll(/https?:\/\/[^\s)\]>"']+/g)].map((m) => m[0]);
+  return urls.filter((u) => { try { return new URL(u).hostname.toLowerCase().replace(/^www\./, "") !== host; } catch { return false; } });
 }
 
 export function keywordStats(markdown, keyword) {
@@ -285,6 +332,7 @@ export function processLinks(markdown, context, pages) {
       const candidate = context.internal_link_candidates.find((c) => c.page_id === page.id);
       decisions.push({ link, keep: true, internal: true, page, reason: candidate ? `Relevant internal page (${candidate.id}, relevance ${candidate.relevance})` : "Valid internal page on the same website" });
     } else {
+      if (["service_page", "location_page", "existing_page_optimization"].includes(context.meta.content_type)) { decisions.push({ link, keep: false, reason: "external links are not used on commercial pages (sources stay internal evidence)" }); continue; }
       const source = sources.find((s) => sameUrl(s.url, absolute));
       if (!source) { decisions.push({ link, keep: false, reason: "external URL is not a collected research source" }); continue; }
       decisions.push({ link, keep: true, internal: false, source });

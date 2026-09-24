@@ -116,7 +116,16 @@ export async function requestRevisionAction(_prev: ContentActionState, formData:
 }
 
 export async function retryGenerationAction(_prev: ContentActionState, formData: FormData): Promise<ContentActionState> {
-  return articleOperation(formData, "content/retry", {}, "Retry queued. Completed stages are reused.");
+  // Optional alignment fields (only sent by the regenerate form on needs_revision articles).
+  const extra: Record<string, string> = {};
+  for (const field of ["primary_keyword", "target_location"] as const) {
+    const value = formData.get(field);
+    if (typeof value === "string") extra[field] = value.trim();
+  }
+  const regenerate = formData.get("mode") === "regenerate";
+  return articleOperation(formData, "content/retry", extra, regenerate
+    ? "Regeneration queued. A new version will be created; previous versions are kept."
+    : "Retry queued. Completed stages are reused.");
 }
 
 export async function recheckArticleAction(_prev: ContentActionState, formData: FormData): Promise<ContentActionState> {

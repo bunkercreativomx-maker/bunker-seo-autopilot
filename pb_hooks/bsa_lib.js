@@ -311,11 +311,41 @@ function retryGeneration(actor, body) {
   const running = activeJob(article.id);
   if (running) return running;
   const last = findFirst("content_jobs", "article = {:a}", "-created_at", { a: article.id });
-  if (!last || last.status !== "failed") fail(409, "INVALID_STATE", "Only failed jobs can be retried.");
+  if (article.status === "needs_revision" && last && last.status === "completed") return regenerateArticle(actor, article, body, last);
+  if (!last || last.status !== "failed") fail(409, "INVALID_STATE", "Only failed jobs or articles that need revision can be retried.");
   const mode = last.mode === "revision" ? "revision" : last.mode === "recheck" ? "recheck" : "continue";
   const job = createJob(article, actor, { mode: mode, configuration: last.configuration || {}, revision_instruction: last.revision_instruction || "", attempt: Number(last.attempt || 0) + 1 });
   updateRec("articles", article.id, { status: article.content ? article.status : "researching", updated_at: now() });
   articleActivity($app, article, actor, "CONTENT_RETRY_QUEUED", { job: job.id, mode: mode });
+  return job;
+}
+
+// Retry on an article that exhausted its automatic revisions: rerun the whole
+// pipeline on the SAME article (new research, brief, outline and a new draft
+// version). Previous versions, claims, QA reports, sources and usage records
+// are kept; the worker archives the prior brief/outline/research snapshot.
+// Optional keyword/location alignment is validated like generation inputs.
+function regenerateArticle(actor, article, body, last) {
+  const ts = now();
+  const changes = { status: "researching", updated_at: ts };
+  const keyword = body.primary_keyword === undefined ? "" : clean(body.primary_keyword, 200);
+  const location = body.target_location === undefined ? null : clean(body.target_location, 200);
+  if (body.primary_keyword !== undefined && keyword.length < 2) fail(400, "INVALID", "Primary keyword is required.");
+  if (keyword) changes.primary_keyword = keyword;
+  if (location !== null) changes.target_location = location;
+  if (article.content_type === "location_page" && location === "") fail(400, "INVALID", "Location pages require a target location.");
+  assertRateLimit(actor.organization);
+  let job = null;
+  $app.runInTransaction(function (tx) {
+    const cfg = Object.assign({}, last.configuration || {}, { regenerate: true, pause_after_brief: false });
+    job = insertJob(tx, article, actor, { mode: "generate", configuration: cfg, attempt: Number(last.attempt || 0) + 1 });
+    updateRec("articles", article.id, changes, tx);
+    articleActivity(tx, article, actor, "CONTENT_REGENERATION_QUEUED", {
+      job: job.id, from_version: Number(article.current_version || 0),
+      primary_keyword: { from: String(article.primary_keyword || ""), to: changes.primary_keyword || String(article.primary_keyword || "") },
+      target_location: { from: String(article.target_location || ""), to: changes.target_location === undefined ? String(article.target_location || "") : changes.target_location },
+    });
+  });
   return job;
 }
 

@@ -99,6 +99,24 @@ export default async function ArticlePage({ params, searchParams }: { params: Pr
       {editable && !activeJob && (
         <div className="flex flex-wrap gap-3">
           {a.status === "failed" && <ActionForm action={retryGenerationAction} hidden={hidden} submitLabel="Retry" pendingLabel="Queueing…" />}
+          {a.status === "needs_revision" && (
+            <ActionForm
+              action={retryGenerationAction}
+              hidden={{ ...hidden, mode: "regenerate" }}
+              submitLabel="Retry (regenerate)"
+              pendingLabel="Queueing…"
+              confirm="Regenerate this article? A new version is created; previous versions are kept."
+            >
+              <div className="flex flex-wrap gap-3 text-xs text-slate-600">
+                <label className="flex flex-col gap-1">Primary keyword
+                  <input name="primary_keyword" defaultValue={a.primary_keyword ?? ""} className="rounded border border-slate-300 px-2 py-1 text-sm" required minLength={2} maxLength={200} />
+                </label>
+                <label className="flex flex-col gap-1">Target location
+                  <input name="target_location" defaultValue={a.target_location ?? ""} className="rounded border border-slate-300 px-2 py-1 text-sm" maxLength={200} />
+                </label>
+              </div>
+            </ActionForm>
+          )}
           {a.status === "brief_ready" && (a.pipeline_state as Record<string, unknown> | null)?.awaiting_brief_review ? <ActionForm action={continueAfterBriefAction} hidden={hidden} submitLabel="Continue to outline & draft" /> : null}
           {a.content && !["approved", "rejected", "awaiting_approval"].includes(a.status) && <ActionForm action={recheckArticleAction} hidden={hidden} variant="secondary" submitLabel="Run fact check + QA on current version" />}
         </div>

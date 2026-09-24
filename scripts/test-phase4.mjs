@@ -70,7 +70,7 @@ const ops = {
   approveArticle: async (actor, articleId, opts = {}) => { await op(actor, "content/approve", { articleId, ...opts }); return admin.collection("articles").getOne(articleId); },
   rejectArticle: async (actor, articleId, reason) => { await op(actor, "content/reject", { articleId, reason }); return admin.collection("articles").getOne(articleId); },
   requestRevision: async (actor, articleId, instruction) => admin.collection("content_jobs").getOne((await op(actor, "content/revision", { articleId, instruction })).id),
-  retryGeneration: async (actor, articleId) => admin.collection("content_jobs").getOne((await op(actor, "content/retry", { articleId })).id),
+  retryGeneration: async (actor, articleId, extra = {}) => admin.collection("content_jobs").getOne((await op(actor, "content/retry", { articleId, ...extra })).id),
   requestRecheck: async (actor, articleId) => admin.collection("content_jobs").getOne((await op(actor, "content/recheck", { articleId })).id),
   cancelJob: (actor, jobId) => op(actor, "content/cancel", { jobId }),
 };
@@ -685,6 +685,43 @@ test("P4 REVISION LIMIT: persistent unsupported claims stop after 2 automatic cy
   assert.equal(stubborn.calls.filter((c) => c.task === "revision").length, 2);
   assert.equal((await list("article_qa_reports", `article = "${article.id}"`)).length, 3);
   await assert.rejects(() => ops.approveArticle(actorA, article.id, { acknowledgeHighRisk: true, acknowledgeWarnings: true }), /NOT_APPROVABLE|awaiting approval|BLOCKED/);
+
+  // RETRY (REGENERATE) on the SAME article: v1..v3 preserved, new version, new
+  // research, fresh revision budget, keyword/location alignment, no auto-approval.
+  const before = await list("article_versions", `article = "${article.id}"`, "version");
+  const reportsBefore = (await list("article_qa_reports", `article = "${article.id}"`)).length;
+  const articlesBefore = (await list("articles", `website = "${ids.websiteA}"`)).length;
+  await assert.rejects(() => ops.retryGeneration(actorB, article.id), /NOT_FOUND|not found/i, "other tenant cannot regenerate");
+  const regen = await ops.retryGeneration(actorA, article.id, { primary_keyword: "instalación de paneles solares", target_location: "Ciudad Juárez" });
+  assert.equal(regen.mode, "generate");
+  assert.equal(regen.configuration.regenerate, true);
+  assert.equal(regen.configuration.pause_after_brief, false);
+  const again = await ops.retryGeneration(actorA, article.id);
+  assert.equal(again.id, regen.id, "regenerate is idempotent while queued");
+  let queued = await admin.collection("articles").getOne(article.id);
+  assert.equal(queued.primary_keyword, "instalación de paneles solares");
+  assert.equal(queued.target_location, "Ciudad Juárez");
+  const good = makeProvider();
+  const run2 = await runJob(regen, { provider: good });
+  assert.equal(run2.error, undefined, run2.error?.stack);
+  const after = await list("article_versions", `article = "${article.id}"`, "version");
+  assert.deepEqual(after.slice(0, before.length).map((v) => [v.id, v.version, v.content]), before.map((v) => [v.id, v.version, v.content]), "previous versions untouched");
+  assert.ok(after.length > before.length);
+  assert.equal(after[before.length].version, before.at(-1).version + 1);
+  assert.match(after[before.length].change_reason, /Regenerated draft \(Retry/);
+  assert.ok((await list("article_qa_reports", `article = "${article.id}"`)).length > reportsBefore, "old QA reports kept, new one added");
+  assert.equal((await list("articles", `website = "${ids.websiteA}"`)).length, articlesBefore, "no new article");
+  assert.ok(good.calls.some((c) => c.task === "research_analysis"), "research reran");
+  const regenerated = await admin.collection("articles").getOne(article.id);
+  assert.equal(regenerated.pipeline_state.regenerated_by_job, regen.id);
+  assert.equal(regenerated.pipeline_state.previous_runs.length, 1);
+  assert.equal(regenerated.pipeline_state.previous_runs[0].versions_up_to, before.at(-1).version);
+  assert.ok(regenerated.pipeline_state.previous_runs[0].brief, "previous brief archived");
+  assert.ok(regenerated.revision_cycles <= 2);
+  assert.notEqual(regenerated.status, "approved", "never auto-approved");
+  assert.ok(["awaiting_approval", "needs_revision"].includes(regenerated.status));
+  const acts = (await list("activity_logs", `entity_id = "${article.id}"`)).map((l) => l.action);
+  assert.ok(acts.includes("CONTENT_REGENERATION_QUEUED") && acts.includes("CONTENT_REGENERATION_STARTED"));
 });
 
 test("P4 LOCATION: page without local evidence is flagged INSUFFICIENT_LOCAL_DIFFERENTIATION and blocked", async () => {

@@ -8,8 +8,8 @@ import { Budget } from "./budget.js";
 import { limitsForJob } from "./config.js";
 import { attachSources, buildContext, evidenceIndex } from "./context.js";
 import {
-  buildStructuredData, checkMetadata, detectRisk, duplicateCheck, enforceClaim, keywordStats,
-  localDifferentiation, processLinks, repetitionStats, sanitizeSlug, scanUnsupportedSpecifics,
+  buildStructuredData, checkMetadata, detectRisk, duplicateCheck, enforceClaim, externalLinks, keywordStats,
+  localDifferentiation, processLinks, repetitionStats, sanitizeSlug, scanEditorialLanguage, scanUnsupportedSpecifics,
   structureStats, summarizeClaims,
 } from "./checks.js";
 import {
@@ -59,15 +59,27 @@ export async function loadPageTexts(data, { fetcher = fetchSource, limit = 6, pr
   return texts;
 }
 
-function researchQueries(context, extra = []) {
+/** Official / primary-source queries by country (searched FIRST so they rank in). */
+const OFFICIAL_QUERY_SITES = {
+  MX: ["site:gob.mx", "site:cfe.mx", "site:cre.gob.mx OR site:conuee.gob.mx"],
+};
+
+export function researchQueries(context, extra = [], country = "") {
   const kw = context.meta.primary_keyword;
   const loc = context.meta.target_location;
+  const sites = OFFICIAL_QUERY_SITES[String(country || "").toUpperCase()] || [];
+  const official = sites.map((site) => `${kw} ${site}`);
   const base = [loc ? `${kw} ${loc}` : kw, kw];
-  return [...new Set([...base, ...extra].map((q) => safeText(q, 200)).filter(Boolean))];
+  return [...new Set([...official, ...base, ...extra].map((q) => safeText(q, 200)).filter(Boolean))];
 }
 
-function computeQaStatus({ qa, claimSummary, specifics, duplicate, local, structure }) {
+function describeSkipped(list) {
+  return list.slice(0, 8).map((x) => `${x.url} (${String(x.reason || x.status || "").slice(0, 80)})`).join("; ");
+}
+
+function computeQaStatus({ qa, claimSummary, specifics, duplicate, local, structure, editorial = [] }) {
   const reasons = [];
+  if (editorial.length) reasons.push(`${editorial.length} editorial note(s) / reader warning(s) about the client in public copy`);
   if (claimSummary.blocking) reasons.push(`${claimSummary.blocking} high-risk unsupported or contradicted claim(s)`);
   const blockerSpecifics = specifics.filter((s) => s.severity === "blocker");
   if (blockerSpecifics.length) reasons.push(`Unverified specifics: ${blockerSpecifics.map((s) => s.value).slice(0, 5).join(", ")}`);
@@ -95,11 +107,28 @@ export async function processContentJob(pb, job, deps) {
     data = await loadJobData(pb, job);
     article = data.article;
     const limits = limitsForJob(config, job.configuration || {});
-    const prior = ["generate", "continue"].includes(job.mode) ? await priorGenerationUsage(pb, article, job.id) : {};
+    let state = { ...(article.pipeline_state || {}) };
+    const saveState = async (fields = {}) => { article = await updateArticle(pb, article.id, { pipeline_state: state, ...fields }); };
+    // Regeneration (Retry on a needs_revision article): archive the previous
+    // run's brief/outline/research snapshot and rerun every stage. Versions,
+    // claims, QA reports, links, sources and ai_usage are separate records and
+    // are never deleted. Idempotent per job (a worker retry does not re-archive).
+    if (job.configuration?.regenerate && job.mode === "generate" && state.regenerated_by_job !== job.id) {
+      const previousResearch = (await pb.collection("article_research").getList(1, 1, { filter: `article = "${esc(article.id)}"` })).items[0];
+      const archived = {
+        archived_at: now(), by_job: job.id, versions_up_to: article.current_version, title: article.title, primary_keyword: article.primary_keyword,
+        brief: article.brief || null, outline: article.outline || null, qa_status: article.qa_status, fact_check_status: article.fact_check_status,
+        revision_cycles: article.revision_cycles || 0, target_location: article.target_location || "",
+        research: previousResearch ? { id: previousResearch.id, search_intent: previousResearch.search_intent, audience: previousResearch.audience, questions: previousResearch.questions, facts: previousResearch.facts, source_ids: previousResearch.source_ids, do_not_claim: previousResearch.do_not_claim, content_gaps: previousResearch.content_gaps, recommended_angle: previousResearch.recommended_angle, risks: previousResearch.risks, research_status: previousResearch.research_status, research_notes: previousResearch.research_notes } : null,
+      };
+      state = { previous_runs: [...(state.previous_runs || []), archived].slice(-5), regenerated_by_job: job.id, regeneration_started_at: now() };
+      await saveState({ status: "researching", qa_status: "pending", fact_check_status: "pending", revision_cycles: 0 });
+      await logActivity(pb, { article, action: "CONTENT_REGENERATION_STARTED", user: job.triggered_by, metadata: { job: job.id, from_version: archived.versions_up_to } });
+    }
+    const usageSince = state.regeneration_started_at || "";
+    const prior = ["generate", "continue"].includes(job.mode) ? await priorGenerationUsage(pb, article, job.id, usageSince) : {};
     const budget = new Budget(limits, prior);
     const ctx = { provider, config, budget, onUsage: (usage) => recordUsage(pb, usage, { job, article }) };
-    const state = { ...(article.pipeline_state || {}) };
-    const saveState = async (fields = {}) => { article = await updateArticle(pb, article.id, { pipeline_state: state, ...fields }); };
 
     await progress("building_context");
     const pageTexts = await loadPageTexts(data, { fetcher, primaryKeyword: article.primary_keyword });
@@ -112,6 +141,11 @@ export async function processContentJob(pb, job, deps) {
     // ------------------------------------------------------------ research
     let research;
     let sourceRecords = await pb.collection("research_sources").getFullList({ filter: `article = "${esc(article.id)}"`, sort: "created_at" });
+    // After a regeneration only this run's sources are evidence (older ones stay stored).
+    if (state.regenerated_by_job) {
+      const ids = new Set(state.source_ids || []);
+      sourceRecords = sourceRecords.filter((s) => ids.has(s.id));
+    }
     if (job.mode === "generate" || job.mode === "continue") {
       if (!state.research) {
         await progress("researching");
@@ -120,11 +154,16 @@ export async function processContentJob(pb, job, deps) {
         if (!sourceRecords.length && limits.maxResearchSources > 0) {
           try {
             const collected = await collectExternalSources({
-              provider: researchProvider, queries: researchQueries(context), language: context.meta.language.split("-")[0],
+              provider: researchProvider, queries: researchQueries(context, [], data.website.country || data.client.country), language: context.meta.language.split("-")[0],
               country: data.website.country || data.client.country, clientDomain: data.website.domain, maxSources: limits.maxResearchSources, fetcher, now, logger,
             });
             sourceRecords = await upsertSources(pb, article, collected.sources.map((s) => ({ ...s, provider: researchProvider.name })));
-            researchNote = `${collected.sources.length} source(s) fetched; ${collected.blocked.length} blocked by SSRF policy; ${collected.failed.length} unreachable.`;
+            state.source_ids = sourceRecords.map((s) => s.id);
+            researchNote = [
+              `${collected.sources.length} source(s) fetched; ${collected.blocked.length} blocked by SSRF policy; ${collected.failed.length} unreachable.`,
+              collected.blocked.length ? `Blocked: ${describeSkipped(collected.blocked)}` : "",
+              collected.failed.length ? `Unreachable: ${describeSkipped(collected.failed)}` : "",
+            ].filter(Boolean).join(" ");
           } catch (error) {
             if (!(error instanceof ResearchUnavailableError)) throw error;
             researchNote = `External research unavailable: ${error.message}`;
@@ -199,7 +238,7 @@ export async function processContentJob(pb, job, deps) {
           source_research: article.research || "", research_provider: researchProvider?.name || "none",
           generated_at: now(), content_job: job.id, auto_publish_allowed: false, writer_notes: safeText(draft.notes_for_editor, 1500),
         };
-        const version = await createVersion(pb, article, { title: draft.title, content: cleaned.markdown }, { changeType: "ai_generation", reason: "Initial AI draft", label: provider.name });
+        const version = await createVersion(pb, article, { title: draft.title, content: cleaned.markdown }, { changeType: "ai_generation", reason: state.regenerated_by_job ? `Regenerated draft (Retry, job ${job.id}): verified facts + editorial policy; previous versions preserved` : "Initial AI draft", label: provider.name });
         state.draft_version = version;
         await saveState({ title: safeText(draft.title, 300), content: cleaned.markdown, content_format: "markdown", status: "draft", current_version: version, provenance, qa_status: "pending", fact_check_status: "pending" });
         await logActivity(pb, { article, action: "DRAFT_GENERATED", metadata: { version, words: structureStats(cleaned.markdown, context).words } });
@@ -259,6 +298,9 @@ export async function processContentJob(pb, job, deps) {
       })));
       const claimSummary = summarizeClaims(claims);
       const specifics = scanUnsupportedSpecifics(content, context);
+      const editorial = scanEditorialLanguage(content);
+      const commercial = ["service_page", "location_page", "existing_page_optimization"].includes(article.content_type);
+      const outbound = commercial ? externalLinks(content, context.meta.website_domain) : [];
       const risk = detectRisk([content, context.meta.primary_keyword], [...(research.risk_categories || []), ...claims.filter((c) => ["medical", "legal", "financial"].includes(c.claim_type)).map((c) => c.claim_type)]);
 
       await progress("quality_review");
@@ -268,10 +310,12 @@ export async function processContentJob(pb, job, deps) {
       const kw = keywordStats(content, context.meta.primary_keyword);
       const repetition = repetitionStats(content);
       const metaIssues = checkMetadata(metaFields, context);
-      const deterministic = { structure, keyword: kw, repetition, duplicate, local_differentiation: local, metadata_issues: metaIssues, unsupported_specifics: specifics, claims: claimSummary, removed_links: linkResult.removed, internal_links_inserted: linkResult.inserted.length };
+      const deterministic = { structure, keyword: kw, repetition, duplicate, local_differentiation: local, metadata_issues: metaIssues, unsupported_specifics: specifics, editorial_language: editorial, external_links_in_copy: outbound, claims: claimSummary, removed_links: linkResult.removed, internal_links_inserted: linkResult.inserted.length };
       const qa = await runQA(ctx, context, { brief: article.brief, content, metadata: metaFields, deterministic });
       // Deterministic issues are always included; they don't depend on the reviewer model.
       const detIssues = [
+        ...editorial.map((e) => ({ severity: "blocker", check: e.code === "EDITORIAL_NOTE_IN_COPY" ? "structure" : "brand_consistency", description: `${e.code}: ${e.value}`, fix: e.code === "EDITORIAL_NOTE_IN_COPY" ? "Remove the editorial note from the public copy." : "Remove the warning; omit unverified business information silently instead of hedging it." })),
+        ...(outbound.length ? [{ severity: "major", check: "internal_links", description: `External URL(s) in commercial page copy: ${outbound.slice(0, 3).join(", ")}`, fix: "Remove external links/URLs; research sources stay as internal evidence." }] : []),
         ...specifics.map((s) => ({ severity: s.severity, check: s.code === "POSSIBLE_FAKE_QUOTE" ? "hallucination_risk" : "unsupported_claims", description: `${s.code}: ${s.value}`, fix: "Remove the specific or back it with verified/sourced evidence." })),
         ...claims.filter((c) => c.blocking || c.verification_status === "UNVERIFIED").map((c) => ({ severity: c.blocking ? "blocker" : "major", check: "unsupported_claims", description: `${c.verification_status} ${c.claim_type} claim: "${c.claim.slice(0, 200)}"`, fix: c.suggested_rewrite || (c.action === "remove" ? "Remove this claim." : "Rewrite without unsupported specifics.") })),
         ...metaIssues.map((m) => ({ severity: m.severity, check: "seo_metadata", description: m.description, fix: "Adjust metadata." })),
@@ -282,7 +326,7 @@ export async function processContentJob(pb, job, deps) {
         ...repetition.repeated.map((r) => ({ severity: "minor", check: "repetition", description: `Repeated sentence (${r.count}×): ${r.sentence}`, fix: "Remove repetition." })),
       ];
       const allIssues = [...qa.issues, ...detIssues];
-      const verdict = computeQaStatus({ qa: { ...qa, issues: allIssues }, claimSummary, specifics, duplicate, local, structure });
+      const verdict = computeQaStatus({ qa: { ...qa, issues: allIssues }, claimSummary, specifics, duplicate, local, structure, editorial });
       const flags = new Set((article.flags || []).filter((f) => !["POTENTIAL_DUPLICATE_CONTENT", "INSUFFICIENT_LOCAL_DIFFERENTIATION", "HIGH_RISK_REVIEW_REQUIRED", "UNSUPPORTED_BUSINESS_CLAIM", "LANGUAGE_MISMATCH"].includes(f)));
       if (duplicate.level !== "none") flags.add("POTENTIAL_DUPLICATE_CONTENT");
       if (local.applicable && local.level !== "none") flags.add("INSUFFICIENT_LOCAL_DIFFERENTIATION");
