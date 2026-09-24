@@ -93,8 +93,10 @@ export async function recordUsage(pb, usage, { job, article }) {
 }
 
 /** Prior AI usage of this article's generation lifecycle (generate/continue jobs). */
-export async function priorGenerationUsage(pb, article, currentJobId) {
-  const jobs = await pb.collection("content_jobs").getFullList({ filter: `article = "${esc(article.id)}" && (mode = "generate" || mode = "continue") && id != "${esc(currentJobId)}"`, fields: "id" });
+/** Usage of earlier generate/continue jobs of THIS run (a regeneration starts a new budget window at `since`). */
+export async function priorGenerationUsage(pb, article, currentJobId, since = "") {
+  const window = since ? ` && created_at >= "${esc(since)}"` : "";
+  const jobs = await pb.collection("content_jobs").getFullList({ filter: `article = "${esc(article.id)}" && (mode = "generate" || mode = "continue") && id != "${esc(currentJobId)}"${window}`, fields: "id" });
   if (!jobs.length) return { calls: 0, tokens: 0, cost: 0 };
   const filter = jobs.map((j) => `content_job = "${esc(j.id)}"`).join(" || ");
   const rows = await pb.collection("ai_usage").getFullList({ filter: `article = "${esc(article.id)}" && (${filter})`, fields: "input_tokens,output_tokens,estimated_cost,cost_status" });

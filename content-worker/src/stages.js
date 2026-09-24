@@ -20,7 +20,7 @@ const EVIDENCE_RULES = `EVIDENCE CATEGORIES (never mix them):
 
 export const CONTENT_TYPE_GUIDE = {
   blog_article: "Blog article: answer the searcher's question thoroughly and helpfully; educational tone; support commercial pages with contextual internal links; light, contextual CTA; avoid sales-heavy language.",
-  service_page: "Service page: NOT a blog post. Prioritize service clarity (what it is, who it is for), benefits, how the process works, relevant local/business context, FAQs, trust signals that are VERIFIED only, and a clear CTA. Scannable sections, concise paragraphs.",
+  service_page: "Service page: NOT a blog post and NOT a buyer's guide. Written by the business, in first person plural (\"instalamos\", \"te ayudamos\" / \"we install\"), addressed to the prospective customer. Prioritize service clarity (what it is, who it is for), benefits, how a project works, relevant local context only where supported, FAQs, and a clear CTA. Trust signals only if VERIFIED (F*). Scannable sections, concise paragraphs. Never advise the reader to distrust, audit or verify the business.",
   location_page: "Location page: must contain genuinely location-specific content grounded in evidence about the target location (local conditions, service area details, local regulations or climate from sources). NEVER a generic page with the city name swapped in. If local evidence is thin, keep the page short and honest rather than padding it.",
   guide: "Guide: comprehensive, step-by-step or structured reference that fully solves the task; clear sections, practical detail, sources for external facts.",
   comparison: "Comparison: represent every alternative fairly; no fabricated specifications, prices or performance numbers; every comparative fact needs evidence; state clearly when information is not available.",
@@ -133,7 +133,9 @@ Rules:
 - internal_links may only use L* candidate ids.
 - things_to_avoid must include every item the research marked as do-not-claim, plus generic fabrications (fake statistics, testimonials, prices, credentials, guarantees).
 - target_length: derive from intent, content type and complexity; quality over word count.
-- CTA: use the client's declared CTA only if it exists in evidence; otherwise a neutral contact CTA without promises.
+- CTA: only verified contact details (F* phone/email) and no promises that are not F* facts. If there are no verified contacts, a neutral contact CTA without promises.
+- Do not plan sections whose only purpose is to discuss unverified business topics (financing, warranties, certifications, case studies, testimonials, prices). If the information is not in F*, leave the topic out.
+- Do not plan editor notes, suggested forms, reference lists or reader warnings about the business.
 ${voiceLine(context)}
 ${languageLine(context)}`,
     input: evidenceBlock(context, { extra: { research } }),
@@ -173,7 +175,7 @@ export async function runOutline(ctx, context, research, brief) {
 ${GUARD}
 ${EVIDENCE_RULES}
 Content type guidance: ${CONTENT_TYPE_GUIDE[context.meta.content_type]}
-Rules: one H1; H2/H3 sections that each serve a clear purpose for the reader; do not create headings solely to insert keywords; list supporting evidence ids per section (never AI inference I* ids as evidence); internal_link_ids from L* only; mark where CTAs go. Include FAQ entries only when they reflect real searcher questions.
+Rules: one H1 containing the primary keyword${context.meta.target_location ? ` and ${context.meta.target_location}` : ""}; H2/H3 sections that each serve a clear purpose for the reader; do not create headings solely to insert keywords; list supporting evidence ids per section (never AI inference I* ids as evidence); internal_link_ids from L* only; mark where CTAs go. Include FAQ entries only when they reflect real searcher questions and can be answered without unverified business facts. No sections about unverified business topics (financing, warranties, certifications, case studies, prices) and no "trust signals to request" or reference-list sections.
 ${languageLine(context)}`,
     input: evidenceBlock(context, { include: ["verified_facts", "unverified_data", "crawler_evidence", "external_sources", "internal_link_candidates"], extra: { research, brief } }),
     schema: outlineSchema,
@@ -198,11 +200,21 @@ const draftSchema = obj({
   notes_for_editor: str(1500),
 });
 
+const COMMERCIAL_TYPES = new Set(["service_page", "location_page", "existing_page_optimization"]);
+
 function writerRules(context) {
+  const commercial = COMMERCIAL_TYPES.has(context.meta.content_type);
+  const verifiedContacts = context.verified_facts.filter((f) => ["phone", "email"].includes(f.type)).map((f) => `${f.id} ${f.type}: ${f.value}`);
   return `WRITING RULES:
-- State business-specific facts (prices, financing, warranties, certifications, availability, address, phone, promotions, years in business, guarantees, credentials) ONLY if they come from a VERIFIED fact (F*). Otherwise omit them, or use clearly non-assertive wording (e.g. "ask about available options") without inventing specifics.
+- Business-specific statements (services offered, prices, financing, warranties, certifications, availability, address, phone, email, promotions, years in business, project counts, savings, guarantees, credentials, response times, case studies) may ONLY come from a VERIFIED fact (F*). Anything not in F* is OMITTED ENTIRELY: do not mention it, do not hedge it, do not attribute it ("la empresa menciona/afirma", "según el proveedor", "declaraciones del proveedor"), and do not tell the reader to verify it or to ask for documents. Omission is silent.
+- U* (client-declared) and C* (client website text) are NOT proof of business facts. Use them only to understand context, never as a source for business-specific statements.
+- Never write warnings to the reader about the client (e.g. "exige los documentos", "verifica los datos antes de acudir", "señales de confianza que debes solicitar"). The page is published by the client.
+- Public copy only: NO notes to the editor, NO placeholders, NO "formulario sugerido"/field lists for forms, NO statements about the text itself ("este texto presenta..."), NO "sujeto a verificación". Anything for the editor goes in notes_for_editor, never in content_markdown.
+- Describe how a solar/technical process works as general, stable knowledge; do not turn it into specific promises about what this business does unless F* says so.
 - Never invent statistics, percentages, prices, quotes, testimonials, case studies, credentials, awards, guarantees or sources. Numbers must come from F* or S* evidence.
-- External facts must be supported by S* sources. Do not fabricate citations. You may link a source only using its exact S* url.
+- External facts must be supported by S* sources, which are INTERNAL evidence for the fact checker. ${commercial ? "Do NOT put external links or raw URLs in the copy of this page; do not add a references/sources list." : "Link a source only when it genuinely helps the reader, using its exact S* url; never list raw URLs."}
+- CTA: ${verifiedContacts.length ? `use ONLY these verified contact details, verbatim: ${verifiedContacts.join("; ")}. No promises (free quote, response time, discounts) unless they are F* facts.` : "no verified contact details exist: use a neutral CTA without phone, email or promises."}
+- Keyword/location: the H1 must contain the primary keyword${context.meta.target_location ? ` and the target location (${context.meta.target_location})` : ""} naturally, in the output language.
 - Internal links: use markdown links to the exact URLs of L* candidates where they genuinely help the reader. Vary anchors; never repeat the same anchor excessively; do not link irrelevant pages.
 - No keyword stuffing, generic filler, repetitive intros, or empty phrases. Natural, useful, specific.
 - Markdown only: start with "# " H1, then "##"/"###" sections. No HTML, no front matter, no images.
@@ -271,9 +283,9 @@ const metadataSchema = obj({
 
 export async function runMetadata(ctx, context, content) {
   return callTask(ctx, "metadata", {
-    instructions: `You are the SEO EDITOR. Produce metadata for the draft below.
+    instructions: `You are the SEO EDITOR. Primary keyword: "${context.meta.primary_keyword}". Produce metadata for the draft below.
 ${GUARD}
-Rules: SEO title 30–60 characters reflecting the primary keyword naturally; meta description 120–155 characters, accurate to the content, no claims absent from the draft, no fake superlatives; slug lowercase-hyphenated ASCII (no accents), short; excerpt 1–2 sentences. Schema suggestions: mark applicable=true only when the page genuinely matches (FAQPage only if there is a real Q&A section; never for every article).
+Rules: SEO title 30–60 characters containing the primary keyword${context.meta.target_location ? ` and the target location (${context.meta.target_location})` : ""} naturally; meta description 120–155 characters, accurate to the content, no claims absent from the draft, no fake superlatives; slug lowercase-hyphenated ASCII (no accents), short; excerpt 1–2 sentences. Schema suggestions: mark applicable=true only when the page genuinely matches (FAQPage only if there is a real Q&A section; never for every article).
 ${languageLine(context)}`,
     input: evidenceBlock(context, { include: [], extra: { draft: content } }),
     schema: metadataSchema,
@@ -299,7 +311,7 @@ const claimsSchema = obj({
 
 export async function runClaimExtraction(ctx, context, content) {
   return callTask(ctx, "claim_extraction", {
-    instructions: `You are the CLAIM EXTRACTOR. List every meaningful factual claim in the draft: statements about the business (services, availability, prices, financing, warranties, certifications, contact details, experience, guarantees, promotions), statistics and numbers, product/technical specifications, regulations/legal statements, financial statements (savings, ROI, incentives), health/safety statements, and other verifiable external facts. Skip opinions, generic advice and obviously non-factual text. Quote or tightly paraphrase each claim. business_specific=true when the claim is about this specific business.
+    instructions: `You are the CLAIM EXTRACTOR. List every meaningful factual claim in the draft: statements about the business (services, availability, prices, financing, warranties, certifications, contact details, experience, guarantees, promotions), statistics and numbers, product/technical specifications, regulations/legal statements, financial statements (savings, ROI, incentives), health/safety statements, and other verifiable external facts. Skip opinions, generic advice and obviously non-factual text. Quote or tightly paraphrase each claim; do not merge unrelated claims and do not drop any meaningful claim. business_specific=true when the claim is about this specific business (its services, contact details, area, process commitments, results). Stable textbook technical knowledge (how photovoltaic systems work, what an inverter does, which factors affect production) is claim_type "general" or "product" with business_specific=false and sensitive_topic "none".
 ${GUARD}`,
     input: evidenceBlock(context, { include: [], extra: { draft: content } }),
     schema: claimsSchema,
@@ -332,7 +344,8 @@ export async function runFactCheck(ctx, context, claims) {
 - SUPPORTED: supported by an external source (S*) excerpt, or a non-sensitive business description observable on the client website (C*).
 - UNVERIFIED: no evidence supports it.
 - CONTRADICTED: evidence contradicts it.
-- NOT_REQUIRED: generic, common-knowledge statement that needs no source.
+- NOT_REQUIRED: generic, common-knowledge statement that needs no source — including stable textbook technical knowledge (e.g. "panels produce direct current", "an inverter converts DC to AC", "orientation, tilt and shading affect production"). Never for business-specific claims, statistics, numbers, prices, financing, legal/regulatory or health/safety statements.
+For business-specific claims: VERIFIED only when an F* fact states it (cite the F* id). Contact details are VERIFIED only if they match an F* value exactly.
 Cite ONLY evidence ids whose text actually supports the claim. Never invent a citation, a source, or an id. AI inference ids (I*) are not evidence.
 Action: approve (fine), flag (keep but human should check), rewrite (give a suggested_rewrite that removes unsupported specifics), remove (delete the claim).
 ${GUARD}
@@ -360,7 +373,8 @@ const qaSchema = obj({
 export async function runQA(ctx, context, { brief, content, metadata, deterministic }) {
   return callTask(ctx, "qa", {
     instructions: `You are the QA REVIEWER, independent from the writer. Review the draft for: search intent match, usefulness, factual consistency with evidence, unsupported claims, brand consistency, duplicate content, keyword stuffing, structure, readability, internal links, CTA, local differentiation (location pages), SEO metadata, grammar, repetition and hallucination risk.
-Use the deterministic measurements provided (they are computed by code and are reliable). Return actionable issues with concrete fixes. Mark "blocker" only for problems that make the content unpublishable (fabrication, wrong language, unsupported high-risk claims, off-intent). A numeric score is secondary; issues matter.
+Use the deterministic measurements provided (they are computed by code and are reliable). Return actionable issues with concrete fixes. Mark "blocker" only for problems that make the content unpublishable (fabrication, wrong language, unsupported high-risk claims, off-intent, editorial notes or reader warnings about the client in the copy). A numeric score is secondary; issues matter.
+EDITORIAL POLICY (fixed, do not contradict it): business information that is not a VERIFIED fact (F*) must be OMITTED. Therefore NEVER raise an issue asking to add unverified business information (address/NAP, hours, warranties, financing, certifications, prices, cost ranges, ROI figures, case studies, testimonials, project counts, logos). Their absence is correct. Local relevance is required only where evidence supports it. The CTA is judged on the copy (clear next step using verified contact details); forms, buttons and maps are provided by the page template and are not part of this review. External links are intentionally not included on commercial pages.
 Content type guidance: ${CONTENT_TYPE_GUIDE[context.meta.content_type]}
 ${GUARD}
 ${languageLine(context)}`,

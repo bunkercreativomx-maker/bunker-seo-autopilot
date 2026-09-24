@@ -200,7 +200,12 @@ export async function fetchSource(url, { timeoutMs = 15_000, maxBytes = 1_500_00
   let current = url;
   for (let hop = 0; hop <= maxRedirects; hop++) {
     const gate = await ssrfCheck(current);
-    if (!gate.ok) return { ok: false, ssrfBlocked: true, status: 0, finalUrl: current, error: gate.reason };
+    if (!gate.ok) {
+      // A DNS failure is "unreachable", not an SSRF block; only private/special
+      // destinations and bad schemes count as blocked.
+      const dnsFailure = /^(DNS resolution failed|No addresses) for /.test(String(gate.reason || ""));
+      return { ok: false, ssrfBlocked: !dnsFailure, status: 0, finalUrl: current, error: gate.reason };
+    }
     let result;
     try {
       result = await requestOnce(current, { timeoutMs, maxBytes, userAgent });
@@ -235,7 +240,7 @@ export async function collectExternalSources({ provider, queries, language, coun
   if (maxSources <= 0) return { sources: [], blocked: [], failed: [] };
   const discovered = [];
   let providerErrors = 0;
-  for (const query of queries.slice(0, 4)) {
+  for (const query of queries.slice(0, 6)) {
     try {
       const results = await provider.search(query, { limit: Math.min(6, maxSources + 2), language, country });
       for (const item of results) discovered.push({ ...item, query });
@@ -244,7 +249,7 @@ export async function collectExternalSources({ provider, queries, language, coun
       logger.warn?.(`[content-worker] research query failed: ${error.message}`);
     }
   }
-  if (providerErrors && providerErrors === Math.min(queries.length, 4)) throw new ResearchUnavailableError("All research queries failed");
+  if (providerErrors && providerErrors === Math.min(queries.length, 6)) throw new ResearchUnavailableError("All research queries failed");
 
   const unique = dedupeSources(discovered)
     .map((item) => ({ ...item, ...classifySource(item.url, { clientDomain }) }))
