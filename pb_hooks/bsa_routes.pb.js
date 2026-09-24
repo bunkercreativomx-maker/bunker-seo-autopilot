@@ -80,3 +80,71 @@ routerAdd("POST", "/api/bsa/logout", (e) => {
     return e.json(500, { code: "INTERNAL", message: "Logout failed." });
   }
 }, $apis.requireAuth("users"));
+
+
+// ---------------------------------------------------------------- Phase 5: publishing
+// Queue-only endpoints: nothing here contacts a website. The independent
+// bunker-seo-publisher worker performs every outbound request.
+routerAdd("POST", "/api/bsa/publishing/config", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const pub = require(`${__hooks}/bsa_publish.js`);
+  return lib.handle(e, (actor, body) => pub.saveConfig(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/publishing/secret", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const pub = require(`${__hooks}/bsa_publish.js`);
+  return lib.handle(e, (actor, body) => pub.saveSecret(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/publishing/test", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const pub = require(`${__hooks}/bsa_publish.js`);
+  return lib.handle(e, (actor, body) => pub.testConnection(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/publishing/preview", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const pub = require(`${__hooks}/bsa_publish.js`);
+  return lib.handle(e, (actor, body) => pub.preview(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/publishing/publish", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const pub = require(`${__hooks}/bsa_publish.js`);
+  return lib.handle(e, (actor, body) => pub.requestPublish(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/publishing/unpublish", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const pub = require(`${__hooks}/bsa_publish.js`);
+  return lib.handle(e, (actor, body) => pub.requestUnpublish(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/publishing/verify", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const pub = require(`${__hooks}/bsa_publish.js`);
+  return lib.handle(e, (actor, body) => pub.requestVerify(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/publishing/rollback", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const pub = require(`${__hooks}/bsa_publish.js`);
+  return lib.handle(e, (actor, body) => pub.requestRollback(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/publishing/cancel", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const pub = require(`${__hooks}/bsa_publish.js`);
+  return lib.handle(e, (actor, body) => pub.cancelJob(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/publishing/versions", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const pub = require(`${__hooks}/bsa_publish.js`);
+  return lib.handle(e, (actor, body) => {
+    const a = lib.getOne("articles", String(body.articleId || ""));
+    if (!a || a.organization !== actor.organization) lib.fail(404, "NOT_FOUND", "Article not found.");
+    return { versions: pub.publishedVersions(a.id) };
+  });
+}, $apis.requireAuth("users"));

@@ -1,7 +1,8 @@
 // Phase 4 content engine record shapes (read side).
 export type ArticleStatus =
   | "researching" | "brief_ready" | "outline_ready" | "drafting" | "draft" | "qa"
-  | "needs_revision" | "awaiting_approval" | "approved" | "rejected" | "failed";
+  | "needs_revision" | "awaiting_approval" | "approved" | "rejected" | "failed"
+  | "publish_queued" | "publishing" | "published" | "publish_failed" | "unpublished";
 
 export type ContentTypeKey = "blog_article" | "service_page" | "location_page" | "guide" | "comparison" | "faq_page" | "existing_page_optimization";
 
@@ -198,6 +199,11 @@ export const ARTICLE_STATUS_LABELS: Record<ArticleStatus, string> = {
   approved: "Approved",
   rejected: "Rejected",
   failed: "Failed",
+  publish_queued: "Publish queued",
+  publishing: "Publishing",
+  published: "Published",
+  publish_failed: "Publish failed",
+  unpublished: "Unpublished",
 };
 
 export const JOB_STEP_LABELS: Record<string, string> = {

@@ -11,7 +11,9 @@
 // - The collections touched here keep createRule/updateRule = null, so users
 //   cannot bypass these checks with direct REST calls.
 // - Activity logs are written here (and by record hooks), never by users.
-// - Nothing in this file publishes content. "approved" is terminal in Phase 4.
+// - Nothing in this file publishes content. Approval records the exact
+//   approved version (snapshot + hash); Phase 5 publishing (bsa_publish.js +
+//   the publisher worker) only ever sends that locked snapshot.
 //
 // JSVM note: handlers run in isolated VMs, so every handler must
 // require() this module itself.
@@ -20,6 +22,9 @@ const CONTENT_TYPES = ["blog_article", "service_page", "location_page", "guide",
 const WRITER_BLOCKED_ROLES = ["viewer", "client"]; // content management
 const EDITABLE = ["title", "slug", "seo_title", "meta_description", "excerpt", "content"];
 const LIMITS = { title: 300, slug: 200, seo_title: 200, meta_description: 400, excerpt: 1000, content: 300000 };
+// Phase 5: while a publish job is queued/running the article is frozen.
+const PUBLISH_BUSY = ["publish_queued", "publishing"];
+const PUBLICATION_STATES = ["publish_queued", "publishing", "published", "publish_failed", "unpublished"];
 
 function now() {
   return new Date().toISOString();
@@ -307,7 +312,7 @@ function articleFor(actor, articleId) {
 function retryGeneration(actor, body) {
   assertContentWriter(actor);
   const article = articleFor(actor, body.articleId);
-  if (["approved", "rejected"].indexOf(String(article.status)) !== -1) fail(409, "INVALID_STATE", "Approved or rejected content cannot be regenerated.");
+  if (["approved", "rejected"].concat(PUBLICATION_STATES).indexOf(String(article.status)) !== -1) fail(409, "INVALID_STATE", "Approved, rejected or published content cannot be regenerated.");
   const running = activeJob(article.id);
   if (running) return running;
   const last = findFirst("content_jobs", "article = {:a}", "-created_at", { a: article.id });
@@ -360,7 +365,7 @@ function requestRecheck(actor, body) {
   assertContentWriter(actor);
   const article = articleFor(actor, body.articleId);
   if (!article.content) fail(409, "INVALID_STATE", "There is no draft to check.");
-  if (["approved", "rejected"].indexOf(String(article.status)) !== -1) fail(409, "INVALID_STATE", "Approved or rejected content is locked.");
+  if (["approved", "rejected"].concat(PUBLICATION_STATES).indexOf(String(article.status)) !== -1) fail(409, "INVALID_STATE", "Approved, rejected or published content is locked. Edit it to create a new version first.");
   return createJob(article, actor, { mode: "recheck" });
 }
 
@@ -432,6 +437,7 @@ function saveManualEdit(actor, body) {
   assertContentWriter(actor);
   const article = articleFor(actor, body.articleId);
   if (["approved", "rejected"].indexOf(String(article.status)) !== -1) fail(409, "INVALID_STATE", "Approved or rejected content is locked. Request a revision instead.");
+  if (PUBLISH_BUSY.indexOf(String(article.status)) !== -1) fail(409, "BUSY", "A publishing job is running for this article.");
   if (activeJob(article.id)) fail(409, "BUSY", "A content job is running for this article. Wait for it to finish before editing.");
   const raw = body.fields || {};
   const next = {};
@@ -452,7 +458,7 @@ function saveManualEdit(actor, body) {
 function restoreVersion(actor, body) {
   assertContentWriter(actor);
   const article = articleFor(actor, body.articleId);
-  if (["approved", "rejected"].indexOf(String(article.status)) !== -1) fail(409, "INVALID_STATE", "Approved or rejected content is locked.");
+  if (["approved", "rejected"].concat(PUBLISH_BUSY).indexOf(String(article.status)) !== -1) fail(409, "INVALID_STATE", "Approved, rejected or publishing content is locked.");
   if (activeJob(article.id)) fail(409, "BUSY", "A content job is running for this article.");
   const wanted = Number(body.version) | 0;
   const source = findFirst("article_versions", "article = {:a} && version = {:v}", "", { a: article.id, v: wanted });
@@ -487,10 +493,16 @@ function approveArticle(actor, body) {
   if (article.qa_status === "NEEDS_REVISION" && !ackWarnings) fail(409, "WARNINGS_NOT_ACKNOWLEDGED", "QA still reports issues after the automatic revision limit. Confirm you reviewed them to approve.");
   const ts = now();
   const provenance = Object.assign({}, article.provenance || {}, { approved_version: article.current_version, auto_publish_allowed: false, high_risk_acknowledged: Boolean(article.high_risk && ackHighRisk) });
+  // Version lock (Phase 5): the exact approved content is snapshotted and
+  // hashed. Publishing sends only this snapshot; later edits create new
+  // versions and need a new approval before any update reaches the website.
+  const P = require(`${__hooks}/bsa_publish.js`);
+  const snapshot = P.snapshotOf(article);
+  const hash = P.snapshotHash(snapshot);
   let updated = null;
   $app.runInTransaction(function (tx) {
-    updated = updateRec("articles", article.id, { status: "approved", approved_by: actor.id, approved_at: ts, provenance: provenance, updated_at: ts }, tx);
-    articleActivity(tx, article, actor, "ARTICLE_APPROVED", { version: article.current_version, qa_status: article.qa_status, high_risk: Boolean(article.high_risk) });
+    updated = updateRec("articles", article.id, { status: "approved", approved_by: actor.id, approved_at: ts, approved_version: Number(article.current_version || 0), approved_hash: hash, approved_snapshot: snapshot, provenance: provenance, updated_at: ts }, tx);
+    articleActivity(tx, article, actor, "ARTICLE_APPROVED", { version: article.current_version, qa_status: article.qa_status, high_risk: Boolean(article.high_risk), approved_hash: hash });
   });
   return updated;
 }
@@ -501,6 +513,7 @@ function rejectArticle(actor, body) {
   if (why.length < 3) fail(400, "INVALID", "A rejection reason is required.");
   const article = articleFor(actor, body.articleId);
   if (article.status === "approved") fail(409, "INVALID_STATE", "Approved content cannot be rejected in Phase 4.");
+  if (["publish_queued", "publishing", "published"].indexOf(String(article.status)) !== -1) fail(409, "INVALID_STATE", "Published content cannot be rejected; unpublish it first.");
   if (activeJob(article.id)) fail(409, "BUSY", "A content job is running for this article.");
   const ts = now();
   let updated = null;
@@ -518,6 +531,7 @@ function requestRevision(actor, body) {
   const article = articleFor(actor, body.articleId);
   if (!article.content) fail(409, "INVALID_STATE", "There is no draft to revise yet.");
   if (article.status === "rejected") fail(409, "INVALID_STATE", "Rejected content cannot be revised.");
+  if (PUBLISH_BUSY.indexOf(String(article.status)) !== -1) fail(409, "BUSY", "A publishing job is running for this article.");
   if (activeJob(article.id)) fail(409, "BUSY", "Another job is already running for this article; try again when it finishes.");
   assertRateLimit(actor.organization);
   let job = null;
@@ -640,7 +654,7 @@ function handle(e, fn) {
 }
 
 module.exports = {
-  CONTENT_TYPES, now, clean, fail, toObj, getOne, findFirst, requestUser, safeLog, handle, logout,
+  CONTENT_TYPES, now, clean, fail, toObj, getOne, findFirst, findMany, createRec, updateRec, logActivity, articleActivity, requestUser, safeLog, handle, logout,
   validateInputs, approvalBlockers, startGeneration, retryGeneration, continueAfterBrief, requestRecheck, cancelJob,
   saveBrief, saveManualEdit, restoreVersion, approveArticle, rejectArticle, requestRevision,
   updateStrategyRecord, updateOrganization,

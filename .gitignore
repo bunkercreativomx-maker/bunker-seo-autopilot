@@ -42,3 +42,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 content-worker/node_modules/
+publisher-worker/node_modules/
+staging-site/node_modules/
+staging-site/.next/
+staging-site/.data/

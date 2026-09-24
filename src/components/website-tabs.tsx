@@ -10,6 +10,7 @@ const TABS = [
   { href: "/strategy", label: "Strategy" },
   { href: "/content", label: "Content" },
   { href: "/pages", label: "Pages" },
+  { href: "/publishing", label: "Integrations · Publishing" },
 ] as const;
 
 /** Tabs shown on the website detail pages. Active tab derives from the URL. */

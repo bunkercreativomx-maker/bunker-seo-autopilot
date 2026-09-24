@@ -34,7 +34,7 @@ export default async function ContentDashboardPage({ searchParams }: { searchPar
 
   return (
     <div>
-      <PageHeader title="Content" description="Evidence-based drafts produced by the Phase 4 content engine. Nothing here is published — approved drafts are Phase 5 input." />
+      <PageHeader title="Content" description="Evidence-based content. Drafts → QA → human approval → Publish (manual, confirmed, verified)." />
       <StatusSummary articles={base} hrefFor={hrefFor} />
       <Card className="mb-4">
         <CardBody>

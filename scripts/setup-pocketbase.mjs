@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Bunker SEO Autopilot — PocketBase schema bootstrap (Phases 1–4).
+ * Bunker SEO Autopilot — PocketBase schema bootstrap (Phases 1–5).
  * Creates/updates the multi-tenant collections and access rules idempotently.
  *
  * Usage:
@@ -836,6 +836,203 @@ async function main() {
   ], ADMIN_READ_RULES, { bareName: "ai_usage" });
   await ensureSelectValues("ai_usage", "task", ["research_analysis", "brief_generation", "outline_generation", "draft_generation", "claim_extraction", "fact_check", "qa", "revision", "metadata"]);
 
+  // ---------- PHASE 5: publishing engine ----------
+  // Publishing state is written ONLY by pb_hooks (user-scoped endpoints) and
+  // the bunker-seo-publisher worker (superuser). Users read their org's rows;
+  // secrets live in hidden fields that the REST API never returns to users.
+  await ensureSelectValues("articles", "status", ["publish_queued", "publishing", "published", "publish_failed", "unpublished"]);
+  await ensureCollection("articles", [
+    { name: "approved_version", type: "number", min: 0, onlyInt: true },
+    { name: "approved_hash", type: "text", max: 100 },
+    { name: "approved_snapshot", type: "json", maxSize: 2500000 },
+    { name: "published_at", type: "date", required: false },
+    { name: "published_version", type: "number", min: 0, onlyInt: true },
+  ], ADMIN_READ_RULES, { bareName: "articles" });
+
+  // Website publishing configuration (non-secret). Users can never write these
+  // fields directly (create/update rules below); only the publishing hook does.
+  const P5_WEBSITE_FIELDS = [
+    { name: "publishing_enabled", type: "bool" },
+    { name: "publisher_type", type: "select", values: ["pocketbase_cms", "nextjs_api", "webhook", "wordpress"], maxSelect: 1 },
+    { name: "publishing_mode", type: "select", values: ["manual", "approval", "autopilot_future"], maxSelect: 1 },
+    { name: "publishing_environment", type: "select", values: ["staging", "production"], maxSelect: 1 },
+    { name: "base_url", type: "text", max: 500 },
+    { name: "blog_path", type: "text", max: 200 },
+    { name: "api_endpoint", type: "text", max: 500 },
+    { name: "allowed_domains", type: "json" },
+    { name: "connection_status", type: "select", values: ["not_configured", "connected", "failed", "unauthorized", "invalid_response", "timeout"], maxSelect: 1 },
+    { name: "last_connection_test", type: "date", required: false },
+    { name: "last_connection_error", type: "text", max: 500 },
+    { name: "publication_requires_approval", type: "bool" },
+    { name: "auto_revalidate", type: "bool" },
+    { name: "publishing_configuration", type: "json" },
+    { name: "last_publication_at", type: "date", required: false },
+  ];
+  const lockP5 = P5_WEBSITE_FIELDS.map((f) => `@request.body.${f.name}:isset = false`).join(" && ");
+  await ensureCollection("websites", P5_WEBSITE_FIELDS, {
+    listRule: 'organization.id = @request.auth.organization.id',
+    viewRule: 'organization.id = @request.auth.organization.id',
+    createRule: `organization.id = @request.auth.organization.id && client.organization.id = @request.auth.organization.id && @request.auth.role != "viewer" && @request.auth.role != "client" && ${lockP5}`,
+    updateRule: `organization.id = @request.auth.organization.id && @request.auth.role != "viewer" && @request.auth.role != "client" && @request.body.organization:isset = false && @request.body.client:isset = false && ${lockP5}`,
+    deleteRule: null,
+  });
+
+  await ensureCollection("integrations", [
+    ...tenantFields(),
+    { name: "kind", type: "select", values: ["publishing"], maxSelect: 1, required: true },
+    { name: "publisher_type", type: "select", values: ["pocketbase_cms", "nextjs_api", "webhook", "wordpress"], maxSelect: 1 },
+    { name: "status", type: "select", values: ["active", "disabled"], maxSelect: 1, required: true },
+    // Encrypted at rest (AES-256-GCM, key outside the DB). Hidden: never
+    // returned by the REST API to users; only the publisher worker decrypts.
+    { name: "secret_encrypted", type: "text", max: 4000, hidden: true },
+    { name: "previous_secret_encrypted", type: "text", max: 4000, hidden: true },
+    { name: "previous_secret_valid_until", type: "date", required: false },
+    { name: "secret_last4", type: "text", max: 8 },
+    { name: "secret_set_at", type: "date", required: false },
+    { name: "username", type: "text", max: 200 },
+    { name: "config", type: "json" },
+    { name: "updated_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "integrations",
+    indexes: ["CREATE UNIQUE INDEX idx_integrations_website_kind ON integrations (website, kind)"],
+  });
+
+  await ensureCollection("article_publications", [
+    ...tenantFields(),
+    { name: "article", type: "relation", maxSelect: 1, collectionId: rel("articles"), required: true, cascadeDelete: false },
+    { name: "article_version", type: "number", min: 0, onlyInt: true },
+    { name: "version_hash", type: "text", max: 100 },
+    { name: "publisher_type", type: "select", values: ["pocketbase_cms", "nextjs_api", "webhook", "wordpress"], maxSelect: 1 },
+    { name: "remote_id", type: "text", max: 300 },
+    { name: "public_url", type: "text", max: 1000 },
+    { name: "slug", type: "text", max: 200 },
+    { name: "status", type: "select", values: ["publishing", "verification_required", "published", "unpublished", "failed"], maxSelect: 1, required: true },
+    { name: "epoch", type: "number", min: 0, onlyInt: true },
+    { name: "published_at", type: "date", required: false },
+    { name: "published_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "last_verified_at", type: "date", required: false },
+    { name: "unpublished_at", type: "date", required: false },
+    { name: "metadata", type: "json" },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "article_publications",
+    indexes: [
+      "CREATE UNIQUE INDEX idx_publications_article_website ON article_publications (article, website)",
+      "CREATE INDEX idx_publications_website_slug ON article_publications (website, slug)",
+    ],
+  });
+
+  await ensureCollection("publish_jobs", [
+    ...tenantFields(),
+    { name: "article", type: "relation", maxSelect: 1, collectionId: rel("articles"), required: false, cascadeDelete: false },
+    { name: "publication", type: "relation", maxSelect: 1, collectionId: rel("article_publications"), required: false, cascadeDelete: false },
+    { name: "operation", type: "select", values: ["publish", "update", "unpublish", "rollback", "republish", "verify", "test_connection"], maxSelect: 1, required: true },
+    { name: "publisher_type", type: "select", values: ["pocketbase_cms", "nextjs_api", "webhook", "wordpress"], maxSelect: 1 },
+    { name: "status", type: "select", values: ["queued", "validating", "publishing", "verifying", "published", "failed", "cancelled", "unpublishing", "unpublished", "verification_required", "completed"], maxSelect: 1, required: true },
+    { name: "article_version", type: "number", min: 0, onlyInt: true },
+    { name: "version_hash", type: "text", max: 100 },
+    { name: "target_version", type: "number", min: 0, onlyInt: true },
+    { name: "attempt", type: "number", min: 0, onlyInt: true },
+    { name: "max_attempts", type: "number", min: 1, onlyInt: true },
+    { name: "next_attempt_at", type: "date", required: false },
+    { name: "requested_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "requested_at", type: "date", required: false },
+    { name: "started_at", type: "date", required: false },
+    { name: "completed_at", type: "date", required: false },
+    { name: "public_url", type: "text", max: 1000 },
+    { name: "remote_id", type: "text", max: 300 },
+    { name: "response_summary", type: "json" },
+    { name: "error_code", type: "text", max: 100 },
+    { name: "error_message", type: "text", max: 1000 },
+    { name: "idempotency_key", type: "text", max: 200, required: true },
+    { name: "acknowledge_high_risk", type: "bool" },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "publish_jobs",
+    indexes: [
+      "CREATE INDEX idx_publish_jobs_status ON publish_jobs (status, created_at)",
+      "CREATE UNIQUE INDEX idx_publish_jobs_idempotency ON publish_jobs (idempotency_key) WHERE status NOT IN ('failed', 'cancelled')",
+      "CREATE UNIQUE INDEX idx_publish_jobs_active_article ON publish_jobs (article) WHERE article != '' AND status IN ('queued', 'validating', 'publishing', 'verifying', 'unpublishing')",
+    ],
+  });
+
+  await ensureCollection("publication_events", [
+    ...tenantFields(),
+    { name: "publication", type: "relation", maxSelect: 1, collectionId: rel("article_publications"), required: false, cascadeDelete: false },
+    { name: "article", type: "relation", maxSelect: 1, collectionId: rel("articles"), required: true, cascadeDelete: false },
+    { name: "job", type: "relation", maxSelect: 1, collectionId: rel("publish_jobs"), required: false, cascadeDelete: false },
+    { name: "version", type: "number", min: 0, onlyInt: true },
+    { name: "operation", type: "select", values: ["publish", "update", "verify", "unpublish", "republish", "rollback"], maxSelect: 1, required: true },
+    { name: "status", type: "select", values: ["requested", "success", "failed", "verification_required"], maxSelect: 1, required: true },
+    { name: "remote_id", type: "text", max: 300 },
+    { name: "public_url", type: "text", max: 1000 },
+    { name: "actor", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "details", type: "json", maxSize: 2500000 },
+    { name: "created_at", type: "date", required: false },
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "publication_events",
+    indexes: ["CREATE INDEX idx_publication_events_article ON publication_events (article, created_at)"],
+  });
+
+  // PUBLIC content model (PocketBase CMS mode). Anonymous visitors may read
+  // ONLY published rows of the website they name (?website=<id>). Only safe
+  // public fields are visible; tenant/audit links are hidden fields that the
+  // REST API neither returns nor lets guests filter on. Drafts, research,
+  // claims, QA, AI usage, business facts and notes never enter this table.
+  const PUBLIC_RULE = 'status = "published" && website = @request.query.website';
+  await ensureCollection("published_content", [
+    { name: "organization", type: "relation", maxSelect: 1, collectionId: rel("organizations"), required: true, cascadeDelete: false, hidden: true },
+    { name: "client", type: "relation", maxSelect: 1, collectionId: rel("clients"), required: true, cascadeDelete: false, hidden: true },
+    { name: "website", type: "relation", maxSelect: 1, collectionId: rel("websites"), required: true, cascadeDelete: true },
+    { name: "publication", type: "relation", maxSelect: 1, collectionId: rel("article_publications"), required: true, cascadeDelete: true, hidden: true },
+    { name: "article", type: "relation", maxSelect: 1, collectionId: rel("articles"), required: true, cascadeDelete: false, hidden: true },
+    { name: "article_version", type: "number", min: 0, onlyInt: true, hidden: true },
+    { name: "status", type: "select", values: ["published", "unpublished"], maxSelect: 1, required: true },
+    { name: "title", type: "text", max: 300 },
+    { name: "slug", type: "text", max: 200, required: true },
+    { name: "excerpt", type: "text", max: 1000 },
+    { name: "content", type: "editor", maxSize: 2000000 },
+    { name: "content_format", type: "select", values: ["markdown"], maxSelect: 1 },
+    { name: "featured_image", type: "text", max: 1000 },
+    { name: "seo_title", type: "text", max: 200 },
+    { name: "meta_description", type: "text", max: 400 },
+    { name: "canonical_url", type: "text", max: 1000 },
+    { name: "og_title", type: "text", max: 200 },
+    { name: "og_description", type: "text", max: 400 },
+    { name: "schema", type: "json", maxSize: 200000 },
+    { name: "language", type: "text", max: 20 },
+    { name: "content_type", type: "text", max: 50 },
+    { name: "published_at", type: "date", required: false },
+    { name: "updated_at", type: "date", required: false },
+    { name: "author_public_name", type: "text", max: 200 },
+    { name: "category", type: "text", max: 200 },
+    { name: "tags", type: "json" },
+    { name: "revision", type: "text", max: 64 },
+  ], { listRule: PUBLIC_RULE, viewRule: PUBLIC_RULE, createRule: null, updateRule: null, deleteRule: null }, {
+    bareName: "published_content",
+    indexes: [
+      "CREATE UNIQUE INDEX idx_published_content_publication ON published_content (publication)",
+      "CREATE INDEX idx_published_content_website_slug ON published_content (website, slug, status)",
+    ],
+  });
+
+  // Website-specific taxonomy (architecture-ready; never shared across websites).
+  await ensureCollection("content_taxonomies", [
+    ...tenantFields(),
+    { name: "kind", type: "select", values: ["category", "tag"], maxSelect: 1, required: true },
+    { name: "name", type: "text", required: true, max: 200 },
+    { name: "slug", type: "text", required: true, max: 200 },
+    ...timestamps(),
+  ], ADMIN_READ_RULES, {
+    bareName: "content_taxonomies",
+    indexes: ["CREATE UNIQUE INDEX idx_taxonomies_website_kind_slug ON content_taxonomies (website, kind, slug)"],
+  });
+
   // --- users auth collection: add fields + tighten rules ---
   const usersCol = await getCollection(USERS_COLL);
   usersCol.fields = [...usersCol.fields.filter((f) =>
@@ -878,7 +1075,7 @@ async function main() {
   console.log(`   strategy_jobs:   ${REF.strategy_jobs}`);
   console.log(`   strategy_versions: ${REF.strategy_versions}`);
   console.log(`   ai_usage:        ${REF.ai_usage}`);
-  for (const name of ["articles", "article_versions", "content_jobs", "research_sources", "article_research", "article_claims", "article_internal_links", "article_qa_reports"]) console.log(`   ${name}: ${REF[name]}`);
+  for (const name of ["articles", "article_versions", "content_jobs", "research_sources", "article_research", "article_claims", "article_internal_links", "article_qa_reports", "integrations", "article_publications", "publish_jobs", "publication_events", "published_content", "content_taxonomies"]) console.log(`   ${name}: ${REF[name]}`);
   console.log(`   PB_URL: ${PB_URL}`);
 }
 

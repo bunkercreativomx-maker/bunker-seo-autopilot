@@ -14,12 +14,14 @@ import {
   restoreVersionAction, retryGenerationAction, saveArticleAction, saveBriefAction,
 } from "@/app/actions/content";
 import { ARTICLE_STATUS_LABELS, CONTENT_TYPE_LABELS, JOB_STEP_LABELS } from "@/lib/content/types";
+import { ArticlePublishing } from "@/components/publishing/article-publishing";
+import { getPublication, listPublicationEvents, listPublishJobs, publishPreview, rollbackCandidates } from "@/lib/pocketbase/publishing";
 
 export const dynamic = "force-dynamic";
 
-const TABS = ["content", "preview", "research", "sources", "brief", "outline", "seo", "links", "claims", "qa", "history"] as const;
+const TABS = ["content", "preview", "research", "sources", "brief", "outline", "seo", "links", "claims", "qa", "history", "publishing"] as const;
 type Tab = (typeof TABS)[number];
-const TAB_LABELS: Record<Tab, string> = { content: "Content", preview: "Preview", research: "Research", sources: "Sources", brief: "Brief", outline: "Outline", seo: "SEO", links: "Internal Links", claims: "Claims", qa: "QA", history: "History" };
+const TAB_LABELS: Record<Tab, string> = { content: "Content", preview: "Preview", research: "Research", sources: "Sources", brief: "Brief", outline: "Outline", seo: "SEO", links: "Internal Links", claims: "Claims", qa: "QA", history: "History", publishing: "Publishing" };
 
 function Json({ value }: { value: unknown }) {
   return <pre className="max-h-[480px] overflow-auto rounded-lg bg-slate-50 p-3 text-xs text-slate-700">{JSON.stringify(value ?? null, null, 2)}</pre>;
@@ -47,7 +49,13 @@ export default async function ArticlePage({ params, searchParams }: { params: Pr
   const editable = canWrite(user.role);
   const activeJob = jobs.find((j) => j.status === "queued" || j.status === "running");
   const lastJob = jobs[0];
-  const locked = a.status === "approved" || a.status === "rejected" || Boolean(activeJob);
+  const PUBLISH_STATES = ["approved", "publish_queued", "publishing", "published", "publish_failed", "unpublished"];
+  // Approved/published content is edited only by creating a new version (manual edit
+  // re-opens review on the ARTICLE; the live publication keeps its locked version).
+  const locked = a.status === "rejected" || ["publish_queued", "publishing"].includes(a.status) || a.status === "approved" || Boolean(activeJob);
+  const publishing = tab === "publishing"
+    ? await Promise.all([publishPreview(pb, a.id, a.website), getPublication(pb, a.id), listPublicationEvents(pb, a.id), listPublishJobs(pb, `article = "${a.id}"`, 20), rollbackCandidates(pb, a.id)])
+    : null;
   const blockers = approvalBlockers(a as unknown as Record<string, unknown> & { id: string });
   const hidden = { articleId: a.id, websiteId: a.website };
   const brief = (a.brief ?? {}) as Record<string, unknown>;
@@ -86,7 +94,7 @@ export default async function ArticlePage({ params, searchParams }: { params: Pr
       </div>
 
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
-        Phase 4 never publishes. This draft is not on the live website; “Approved” means ready for Phase 5.
+        {PUBLISH_STATES.includes(a.status) ? "Publishing is manual: Approved → Publish (with confirmation) → worker publishes and verifies. See the Publishing tab." : "Not published. Draft → QA → human approval → Publish."}
       </div>
 
       {(activeJob || lastJob?.status === "failed") && (
@@ -173,7 +181,7 @@ export default async function ArticlePage({ params, searchParams }: { params: Pr
             <Card>
               <CardHeader title="Review" subtitle="Human decision — the writer cannot approve its own content." />
               <CardBody className="space-y-5">
-                {a.status === "approved" && <p className="text-sm text-emerald-700">Approved by {a.expand?.approved_by?.name || a.expand?.approved_by?.email || a.approved_by} on {formatDateTime(a.approved_at)}. Ready for Phase 5 — not published.</p>}
+                {a.approved_at && PUBLISH_STATES.includes(a.status) && <p className="text-sm text-emerald-700">Approved v{String((a as unknown as { approved_version?: number }).approved_version ?? "")} by {a.expand?.approved_by?.name || a.expand?.approved_by?.email || a.approved_by} on {formatDateTime(a.approved_at)}. <Link className="underline" href={tabHref("publishing")}>Publishing →</Link></p>}
                 {a.status === "rejected" && <p className="text-sm text-rose-700">Rejected on {formatDateTime(a.rejected_at)}: {a.rejection_reason}</p>}
                 {editable && a.status === "awaiting_approval" && !activeJob && (
                   <ActionForm action={approveArticleAction} hidden={hidden} submitLabel="Approve" pendingLabel="Approving…">
@@ -407,6 +415,20 @@ export default async function ArticlePage({ params, searchParams }: { params: Pr
             </Card>
           ))}
         </div>
+      )}
+
+      {tab === "publishing" && publishing && (
+        <ArticlePublishing
+          articleId={a.id}
+          websiteId={a.website}
+          status={a.status}
+          editable={editable}
+          preview={publishing[0]}
+          publication={publishing[1]}
+          events={publishing[2]}
+          jobs={publishing[3]}
+          candidates={publishing[4]}
+        />
       )}
 
       {tab === "history" && (

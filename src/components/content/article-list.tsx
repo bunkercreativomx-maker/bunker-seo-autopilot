@@ -4,7 +4,9 @@ import { formatRelative } from "@/lib/format";
 import { ARTICLE_STATUS_LABELS, CONTENT_TYPE_LABELS, type Article, type ArticleStatus } from "@/lib/content/types";
 
 export function articleTone(status: string): "slate" | "green" | "amber" | "red" | "blue" {
-  if (status === "approved") return "green";
+  if (status === "approved" || status === "published") return "green";
+  if (status === "publish_queued" || status === "publishing") return "blue";
+  if (status === "publish_failed") return "red";
   if (status === "awaiting_approval") return "blue";
   if (status === "needs_revision" || status === "draft") return "amber";
   if (status === "failed" || status === "rejected") return "red";
@@ -25,6 +27,10 @@ export const STATUS_GROUPS: Array<{ key: string; label: string; statuses: Articl
   { key: "revision", label: "Needs Revision", statuses: ["needs_revision"] },
   { key: "failed", label: "Failed", statuses: ["failed"] },
   { key: "rejected", label: "Rejected", statuses: ["rejected"] },
+  { key: "publishing", label: "Publishing", statuses: ["publish_queued", "publishing"] },
+  { key: "published", label: "Published", statuses: ["published"] },
+  { key: "publish_failed", label: "Publish Failed", statuses: ["publish_failed"] },
+  { key: "unpublished", label: "Unpublished", statuses: ["unpublished"] },
 ];
 
 export function ArticleTable({ articles, showClient = true, showWebsite = true }: { articles: Article[]; showClient?: boolean; showWebsite?: boolean }) {

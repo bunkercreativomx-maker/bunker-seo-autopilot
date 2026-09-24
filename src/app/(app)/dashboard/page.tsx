@@ -5,6 +5,7 @@ import { listWebsites } from "@/lib/pocketbase/websites";
 import { listActivity } from "@/lib/pocketbase/activity-read";
 import { Card, CardHeader, CardBody, Badge, statusTone, EmptyState, PageHeader, Button } from "@/components/ui";
 import { formatDate, formatRelative } from "@/lib/format";
+import { publishingOverview } from "@/lib/pocketbase/publishing";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,7 @@ export default async function DashboardPage() {
     listWebsites(pb),
     listActivity(pb, 8),
   ]);
+  const pubs = await publishingOverview(pb);
 
   const activeWebsites = websites.filter((w) => w.status === "active").length;
   const recentClients = clients.slice(0, 5);
@@ -58,6 +60,25 @@ export default async function DashboardPage() {
             <div className="mt-1 text-3xl font-semibold text-slate-900">{activity.length}</div>
           </CardBody>
         </Card>
+      </div>
+
+      {/* Publishing monitoring (Phase 5) */}
+      <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {([
+          ["Publishing Queue", pubs.queue, "text-sky-700", "/content?group=publishing"],
+          ["Published", pubs.published, "text-emerald-600", "/content?group=published"],
+          ["Publish Failed", pubs.failed, "text-rose-600", "/content?group=publish_failed"],
+          ["Connection Errors", pubs.connectionErrors, "text-amber-600", "/websites"],
+        ] as const).map(([label, value, tone, href]) => (
+          <Link key={label} href={href}>
+            <Card>
+              <CardBody>
+                <div className="text-sm font-medium text-slate-500">{label}</div>
+                <div className={`mt-1 text-2xl font-semibold ${tone}`}>{value}</div>
+              </CardBody>
+            </Card>
+          </Link>
+        ))}
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">

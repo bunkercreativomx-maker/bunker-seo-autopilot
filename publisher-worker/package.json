@@ -1,0 +1,18 @@
+{
+  "name": "bunker-seo-publisher",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 5 publishing worker: polls publish_jobs, runs publisher adapters, verifies publications.",
+  "scripts": {
+    "start": "node worker.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "pocketbase": "^0.28.1",
+    "undici": "^7.29.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

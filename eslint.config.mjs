@@ -14,6 +14,9 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // PocketBase JSVM hooks (goja runtime, CommonJS require) — not app code.
     "pb_hooks/**",
+    // Separate deployables with their own toolchains.
+    "staging-site/**",
+    "publisher-worker/**",
   ]),
 ]);
 

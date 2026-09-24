@@ -337,7 +337,10 @@ test("P4 SCHEMA: collections, tenant read rules, worker-only writes, no backtick
   }
   const articles = await admin.collections.getOne("articles");
   const status = articles.fields.find((f) => f.name === "status");
-  assert.ok(!status.values.includes("published"), "no published status in Phase 4");
+  // Phase 5 adds publication states; they are reachable only through the
+  // publishing hooks/worker (articles.updateRule stays null for users).
+  assert.equal(articles.updateRule, null, "users cannot write article status directly");
+  for (const st of status.values.filter((v) => /publish/.test(v))) assert.ok(["publish_queued", "publishing", "published", "publish_failed", "unpublished"].includes(st), `unexpected publication status ${st}`);
   for (const f of ["organization", "client", "website", "content_opportunity", "content_plan_item", "keyword", "cluster", "content_type", "title", "slug", "excerpt", "seo_title", "meta_description", "content", "content_format", "status", "primary_keyword", "secondary_keywords", "target_location", "featured_image", "canonical_url", "author", "language", "research", "brief", "outline", "qa_status", "qa_score", "qa_summary", "fact_check_status", "approved_by", "approved_at", "created", "updated", "provenance"]) {
     assert.ok(articles.fields.some((x) => x.name === f), `articles.${f}`);
   }
