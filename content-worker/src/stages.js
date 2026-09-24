@@ -200,6 +200,14 @@ const draftSchema = obj({
   notes_for_editor: str(1500),
 });
 
+const TOPIC_FACT_TYPES = { warranty: ["warranty", "guarantee"], certification: ["certification", "credential"], financing: ["financing"], promotion: ["promotion", "price"] };
+function unverifiedTopicList(context) {
+  const verifiedTypes = new Set(context.verified_facts.map((f) => f.type));
+  const banned = Object.entries(TOPIC_FACT_TYPES).filter(([, types]) => !types.some((t) => verifiedTypes.has(t))).map(([topic]) => topic);
+  banned.push("years in business / experience", "project or installation counts / references / case studies / testimonials", "savings percentages");
+  return ` For this business the following topics are NOT verified and are forbidden in the copy: ${banned.join(", ")}.`;
+}
+
 const COMMERCIAL_TYPES = new Set(["service_page", "location_page", "existing_page_optimization"]);
 
 function writerRules(context) {
@@ -207,7 +215,8 @@ function writerRules(context) {
   const verifiedContacts = context.verified_facts.filter((f) => ["phone", "email"].includes(f.type)).map((f) => `${f.id} ${f.type}: ${f.value}`);
   return `WRITING RULES:
 - Business-specific statements (services offered, prices, financing, warranties, certifications, availability, address, phone, email, promotions, years in business, project counts, savings, guarantees, credentials, response times, case studies) may ONLY come from a VERIFIED fact (F*). Anything not in F* is OMITTED ENTIRELY: do not mention it, do not hedge it, do not attribute it ("la empresa menciona/afirma", "según el proveedor", "declaraciones del proveedor"), and do not tell the reader to verify it or to ask for documents. Omission is silent.
-- U* (client-declared) and C* (client website text) are NOT proof of business facts. Use them only to understand context, never as a source for business-specific statements.
+- UNVERIFIED BUSINESS FACT = NO PUBLIC COPY. U* (client-declared/unverified facts) and C* (client website text) are NOT proof of anything about the business. Do not mention, hint at, rephrase or generalize anything that only appears there. Topics with no F* fact must not appear AT ALL — not even as "we explain our warranties", "ask us about financing", "certified team", "references available", "years of experience", "projects completed", "free quote", savings figures.${unverifiedTopicList(context)}
+- Every sentence that speaks for the business ("we…", "our…") must be backed by an F* fact. Describe the service only at the level the F* facts state; explain how solar projects generally work as general knowledge, not as the business's own process commitments.
 - Never write warnings to the reader about the client (e.g. "exige los documentos", "verifica los datos antes de acudir", "señales de confianza que debes solicitar"). The page is published by the client.
 - Public copy only: NO notes to the editor, NO placeholders, NO "formulario sugerido"/field lists for forms, NO statements about the text itself ("este texto presenta..."), NO "sujeto a verificación". Anything for the editor goes in notes_for_editor, never in content_markdown.
 - Describe how a solar/technical process works as general, stable knowledge; do not turn it into specific promises about what this business does unless F* says so.
@@ -311,7 +320,7 @@ const claimsSchema = obj({
 
 export async function runClaimExtraction(ctx, context, content) {
   return callTask(ctx, "claim_extraction", {
-    instructions: `You are the CLAIM EXTRACTOR. List every meaningful factual claim in the draft: statements about the business (services, availability, prices, financing, warranties, certifications, contact details, experience, guarantees, promotions), statistics and numbers, product/technical specifications, regulations/legal statements, financial statements (savings, ROI, incentives), health/safety statements, and other verifiable external facts. Skip opinions, generic advice and obviously non-factual text. Quote or tightly paraphrase each claim; do not merge unrelated claims and do not drop any meaningful claim. business_specific=true when the claim is about this specific business (its services, contact details, area, process commitments, results). Stable textbook technical knowledge (how photovoltaic systems work, what an inverter does, which factors affect production) is claim_type "general" or "product" with business_specific=false and sensitive_topic "none".
+    instructions: `You are the CLAIM EXTRACTOR. List every meaningful factual claim in the draft: statements about the business (services, availability, prices, financing, warranties, certifications, contact details, experience, guarantees, promotions), statistics and numbers, product/technical specifications, regulations/legal statements, financial statements (savings, ROI, incentives), health/safety statements, and other verifiable external facts. Skip opinions, generic advice and obviously non-factual text. Do NOT extract navigation labels, menu text, CTA or button labels, link/anchor text, breadcrumbs, or headings that are not factual assertions (e.g. "Conócenos", "Más información", "Contacto", "Solicita tu cotización"). Quote or tightly paraphrase each claim; do not merge unrelated claims and do not drop any meaningful claim. business_specific=true when the claim is about this specific business (its services, contact details, area, process commitments, results). Stable textbook technical knowledge (how photovoltaic systems work, what an inverter does, which factors affect production) is claim_type "general" or "product" with business_specific=false and sensitive_topic "none".
 ${GUARD}`,
     input: evidenceBlock(context, { include: [], extra: { draft: content } }),
     schema: claimsSchema,
@@ -341,11 +350,11 @@ export async function runFactCheck(ctx, context, claims) {
   return callTask(ctx, "fact_check", {
     instructions: `You are the FACT CHECKER, independent from the writer. For each numbered claim decide:
 - VERIFIED: business-specific claim directly supported by a VERIFIED fact (F*).
-- SUPPORTED: supported by an external source (S*) excerpt, or a non-sensitive business description observable on the client website (C*).
+- SUPPORTED: a NON-business claim supported by an external source (S*) excerpt. Business claims can never be SUPPORTED: client website (C*) and client declarations/unverified facts (U*) do not verify the business.
 - UNVERIFIED: no evidence supports it.
 - CONTRADICTED: evidence contradicts it.
 - NOT_REQUIRED: generic, common-knowledge statement that needs no source — including stable textbook technical knowledge (e.g. "panels produce direct current", "an inverter converts DC to AC", "orientation, tilt and shading affect production"). Never for business-specific claims, statistics, numbers, prices, financing, legal/regulatory or health/safety statements.
-For business-specific claims: VERIFIED only when an F* fact states it (cite the F* id). Contact details are VERIFIED only if they match an F* value exactly.
+For business-specific claims (anything about this business: services, capabilities, process commitments, coverage, experience, results, warranties, certifications, promises — including any sentence in first person "we/our"): VERIFIED only when an F* fact specifically states it (cite that F* id); otherwise UNVERIFIED with action remove. Contact details are VERIFIED only if they match an F* value exactly.
 Cite ONLY evidence ids whose text actually supports the claim. Never invent a citation, a source, or an id. AI inference ids (I*) are not evidence.
 Action: approve (fine), flag (keep but human should check), rewrite (give a suggested_rewrite that removes unsupported specifics), remove (delete the claim).
 ${GUARD}

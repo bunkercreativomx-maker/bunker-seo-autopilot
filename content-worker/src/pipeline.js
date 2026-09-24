@@ -8,8 +8,8 @@ import { Budget } from "./budget.js";
 import { limitsForJob } from "./config.js";
 import { attachSources, buildContext, evidenceIndex } from "./context.js";
 import {
-  buildStructuredData, checkMetadata, detectRisk, duplicateCheck, enforceClaim, externalLinks, keywordStats,
-  localDifferentiation, processLinks, repetitionStats, sanitizeSlug, scanEditorialLanguage, scanUnsupportedSpecifics,
+  buildStructuredData, checkMetadata, detectRisk, duplicateCheck, enforceClaim, externalLinks, isNonClaimText, keywordStats,
+  localDifferentiation, processLinks, repetitionStats, sanitizeSlug, scanEditorialLanguage, scanUnsupportedSpecifics, scanUnverifiedBusinessMentions,
   structureStats, summarizeClaims,
 } from "./checks.js";
 import {
@@ -77,8 +77,9 @@ function describeSkipped(list) {
   return list.slice(0, 8).map((x) => `${x.url} (${String(x.reason || x.status || "").slice(0, 80)})`).join("; ");
 }
 
-function computeQaStatus({ qa, claimSummary, specifics, duplicate, local, structure, editorial = [] }) {
+function computeQaStatus({ qa, claimSummary, specifics, duplicate, local, structure, editorial = [], unverifiedMentions = [] }) {
   const reasons = [];
+  if (unverifiedMentions.length) reasons.push(`${unverifiedMentions.length} mention(s) of unverified business information in public copy`);
   if (editorial.length) reasons.push(`${editorial.length} editorial note(s) / reader warning(s) about the client in public copy`);
   if (claimSummary.blocking) reasons.push(`${claimSummary.blocking} high-risk unsupported or contradicted claim(s)`);
   const blockerSpecifics = specifics.filter((s) => s.severity === "blocker");
@@ -283,12 +284,17 @@ export async function processContentJob(pb, job, deps) {
       ]);
 
       await progress("checking_claims");
-      const extracted = (await runClaimExtraction(ctx, context, content)).claims;
+      // Navigation, menu, CTA/button labels, anchor text, breadcrumbs and UI
+      // headings are not claims: dropped deterministically before fact check.
+      const rawClaims = (await runClaimExtraction(ctx, context, content)).claims;
+      const extracted = rawClaims.filter((c) => !isNonClaimText(c.claim, content));
+      const nonClaims = rawClaims.length - extracted.length;
       await progress("fact_checking");
       const checked = extracted.length ? (await runFactCheck(ctx, context, extracted)).results : [];
       const evidence = evidenceIndex(context);
       const byIndex = new Map(checked.map((r) => [r.claim_index, r]));
-      const claims = extracted.map((claim, index) => enforceClaim(claim, byIndex.get(index), evidence));
+      const brandTerms = [context.meta.business_name, String(context.meta.website_domain || "").split(".")[0]].filter(Boolean);
+      const claims = extracted.map((claim, index) => enforceClaim(claim, byIndex.get(index), evidence, { brandTerms }));
       const idToRecord = new Map([...context.verified_facts, ...context.external_sources, ...context.crawler_evidence, ...context.unverified_data].map((e) => [e.id, e.record_id || e.page_id || ""]));
       await replaceForVersion(pb, "article_claims", article, article.current_version, claims.map((c) => ({
         claim: c.claim, claim_type: c.claim_type, source: c.source, source_id: idToRecord.get(c.source_id) || "",
@@ -299,6 +305,7 @@ export async function processContentJob(pb, job, deps) {
       const claimSummary = summarizeClaims(claims);
       const specifics = scanUnsupportedSpecifics(content, context);
       const editorial = scanEditorialLanguage(content);
+      const unverifiedMentions = scanUnverifiedBusinessMentions(content, context);
       const commercial = ["service_page", "location_page", "existing_page_optimization"].includes(article.content_type);
       const outbound = commercial ? externalLinks(content, context.meta.website_domain) : [];
       const risk = detectRisk([content, context.meta.primary_keyword], [...(research.risk_categories || []), ...claims.filter((c) => ["medical", "legal", "financial"].includes(c.claim_type)).map((c) => c.claim_type)]);
@@ -310,10 +317,11 @@ export async function processContentJob(pb, job, deps) {
       const kw = keywordStats(content, context.meta.primary_keyword);
       const repetition = repetitionStats(content);
       const metaIssues = checkMetadata(metaFields, context);
-      const deterministic = { structure, keyword: kw, repetition, duplicate, local_differentiation: local, metadata_issues: metaIssues, unsupported_specifics: specifics, editorial_language: editorial, external_links_in_copy: outbound, claims: claimSummary, removed_links: linkResult.removed, internal_links_inserted: linkResult.inserted.length };
+      const deterministic = { structure, keyword: kw, repetition, duplicate, local_differentiation: local, metadata_issues: metaIssues, unsupported_specifics: specifics, editorial_language: editorial, unverified_business_mentions: unverifiedMentions, non_claims_filtered: nonClaims, external_links_in_copy: outbound, claims: claimSummary, removed_links: linkResult.removed, internal_links_inserted: linkResult.inserted.length };
       const qa = await runQA(ctx, context, { brief: article.brief, content, metadata: metaFields, deterministic });
       // Deterministic issues are always included; they don't depend on the reviewer model.
       const detIssues = [
+        ...unverifiedMentions.map((m) => ({ severity: "blocker", check: "unsupported_claims", description: `${m.code} (${m.detail}): ${m.value}`, fix: "Delete this sentence entirely: unverified business information must not be mentioned, hinted at or rephrased." })),
         ...editorial.map((e) => ({ severity: "blocker", check: e.code === "EDITORIAL_NOTE_IN_COPY" ? "structure" : "brand_consistency", description: `${e.code}: ${e.value}`, fix: e.code === "EDITORIAL_NOTE_IN_COPY" ? "Remove the editorial note from the public copy." : "Remove the warning; omit unverified business information silently instead of hedging it." })),
         ...(outbound.length ? [{ severity: "major", check: "internal_links", description: `External URL(s) in commercial page copy: ${outbound.slice(0, 3).join(", ")}`, fix: "Remove external links/URLs; research sources stay as internal evidence." }] : []),
         ...specifics.map((s) => ({ severity: s.severity, check: s.code === "POSSIBLE_FAKE_QUOTE" ? "hallucination_risk" : "unsupported_claims", description: `${s.code}: ${s.value}`, fix: "Remove the specific or back it with verified/sourced evidence." })),
@@ -326,7 +334,7 @@ export async function processContentJob(pb, job, deps) {
         ...repetition.repeated.map((r) => ({ severity: "minor", check: "repetition", description: `Repeated sentence (${r.count}×): ${r.sentence}`, fix: "Remove repetition." })),
       ];
       const allIssues = [...qa.issues, ...detIssues];
-      const verdict = computeQaStatus({ qa: { ...qa, issues: allIssues }, claimSummary, specifics, duplicate, local, structure, editorial });
+      const verdict = computeQaStatus({ qa: { ...qa, issues: allIssues }, claimSummary, specifics, duplicate, local, structure, editorial, unverifiedMentions });
       const flags = new Set((article.flags || []).filter((f) => !["POTENTIAL_DUPLICATE_CONTENT", "INSUFFICIENT_LOCAL_DIFFERENTIATION", "HIGH_RISK_REVIEW_REQUIRED", "UNSUPPORTED_BUSINESS_CLAIM", "LANGUAGE_MISMATCH"].includes(f)));
       if (duplicate.level !== "none") flags.add("POTENTIAL_DUPLICATE_CONTENT");
       if (local.applicable && local.level !== "none") flags.add("INSUFFICIENT_LOCAL_DIFFERENTIATION");

@@ -9,7 +9,6 @@ import {
 // ---------------------------------------------------------------------------
 // Claims
 
-const SENSITIVE_BUSINESS = new Set(["price", "financing", "warranty", "certification", "guarantee", "promotion", "credential", "contact", "availability"]);
 const HIGH_RISK_TYPES = new Set(["statistic", "medical", "financial", "legal"]);
 
 /**
@@ -17,12 +16,69 @@ const HIGH_RISK_TYPES = new Set(["statistic", "medical", "financial", "legal"]);
  * The fact checker can only ever DOWNGRADE trust; it cannot mark a business
  * claim VERIFIED without a verified business fact, nor cite unknown evidence.
  */
-export function enforceClaim(claim, proposal, evidence) {
+// First-person-plural voice (the page is written by the business) or a mention
+// of the brand makes a claim business-specific, whatever the model says.
+const FIRST_PERSON = /\b(nosotros|nuestr[oa]s?|conmigo|contactanos|llamanos|escribenos|visitanos|we|our|ours|us)\b/;
+const FIRST_PERSON_VERB = /\b[a-z]{3,}(amos|emos|imos)\b/g;
+const NOT_VERBS = new Set(["ramos", "tramos", "gramos", "kilogramos", "mismos", "animos", "ultimos", "minimos", "maximos", "proximos", "optimos", "legitimos", "intimos", "decimos", "extremos", "supremos", "primos", "centimos", "anonimos", "sinonimos", "acronimos", "reclamos", "prestamos", "plazos", "remos"]);
+
+/** Deterministic business-claim test; the model cannot declassify a claim. */
+export function isBusinessClaim(claim, { brandTerms = [] } = {}) {
+  if (!claim) return false;
+  if (claim.business_specific || claim.claim_type === "business") return true;
+  const text = normalizeForMatch(claim.claim);
+  if (FIRST_PERSON.test(text)) return true;
+  for (const m of text.matchAll(FIRST_PERSON_VERB)) if (!NOT_VERBS.has(m[0])) return true;
+  return brandTerms.some((t) => t && t.length > 3 && text.includes(normalizeForMatch(t)));
+}
+
+// Topic vocabulary for business information that must be backed by a
+// matching verified fact (and must never appear if only unverified).
+export const BUSINESS_TOPIC_TERMS = {
+  warranty: ["garantia", "garantias", "garantizamos", "garantizado", "garantizada", "warranty", "warranties", "guarantee", "guaranteed"],
+  certification: ["certificacion", "certificaciones", "certificado", "certificados", "certificada", "certificadas", "certified", "certification", "acreditado", "acreditacion", "tier 1", "tier-1"],
+  financing: ["financiamiento", "financiacion", "financiar", "financiado", "credito", "creditos", "meses sin intereses", "sin intereses", "financing", "loan"],
+  promotion: ["gratis", "gratuita", "gratuito", "sin costo", "promocion", "descuento", "free quote", "free", "discount"],
+  experience: ["anos de experiencia", "trayectoria", "desde 2015", "years of experience", "years in business"],
+  track_record: ["instalaciones realizadas", "proyectos realizados", "instalaciones activas", "proyectos reales", "referencias de instalaciones", "referencias de proyectos", "casos de exito", "clientes satisfechos", "testimonios", "case studies", "testimonials"],
+  savings: ["ahorro promedio", "ahorra hasta", "ahorro de hasta", "average savings"],
+};
+const FACT_TYPE_TOPIC = { warranty: "warranty", guarantee: "warranty", certification: "certification", credential: "certification", financing: "financing", promotion: "promotion", price: "promotion" };
+
+export function topicsIn(text) {
+  const norm = ` ${tokens(text).join(" ")} `;
+  return Object.entries(BUSINESS_TOPIC_TERMS).filter(([, terms]) => terms.some((t) => norm.includes(` ${tokens(t).join(" ")} `))).map(([topic]) => topic);
+}
+
+const STOP = new Set(["para", "como", "este", "esta", "estos", "estas", "desde", "entre", "sobre", "segun", "cada", "todo", "toda", "todos", "todas", "tambien", "donde", "cuando", "puede", "pueden", "with", "from", "that", "this", "your", "their", "have", "will"]);
+function stems(text) {
+  return new Set(tokens(text).filter((t) => t.length > 3 && !STOP.has(t) && !/^\d+$/.test(t)).map((t) => t.slice(0, 5)));
+}
+
+/** Does verified fact `fact` specifically support business claim text? */
+export function factSupportsClaim(claimText, fact) {
+  if (!fact) return false;
+  const text = String(claimText || "");
+  const factText = `${fact.label || ""} ${fact.value || ""}`;
+  const claimDigits = (text.match(/\d[\d\s.-]{6,}\d/g) || []).map((d) => d.replace(/\D/g, ""));
+  const factDigits = String(fact.value || "").replace(/\D/g, "");
+  if (["phone", "whatsapp"].includes(fact.type)) return claimDigits.some((d) => d.length >= 8 && factDigits.endsWith(d.slice(-8)));
+  if (fact.type === "email") return normalizeForMatch(text).includes(normalizeForMatch(fact.value));
+  // Any business topic in the claim must be the topic of this fact.
+  const factTopics = new Set([FACT_TYPE_TOPIC[fact.type], ...topicsIn(factText)].filter(Boolean));
+  if (topicsIn(text).some((t) => !factTopics.has(t))) return false;
+  // Numbers in the claim must appear in the fact.
+  const nums = (text.match(/\d+(?:[.,]\d+)?/g) || []);
+  if (nums.some((n) => !String(fact.value || "").includes(n))) return false;
+  const factStems = stems(factText);
+  return [...stems(text)].some((s) => factStems.has(s));
+}
+
+export function enforceClaim(claim, proposal, evidence, { brandTerms = [] } = {}) {
   const known = (proposal?.evidence_ids || []).filter((id) => evidence.has(id));
   const invalidRefs = (proposal?.evidence_ids || []).filter((id) => !evidence.has(id));
   const categories = new Set(known.map((id) => evidence.get(id).category));
-  const business = Boolean(claim.business_specific) || claim.claim_type === "business" || claim.claim_type === "product";
-  const sensitive = SENSITIVE_BUSINESS.has(claim.sensitive_topic);
+  const business = isBusinessClaim(claim, { brandTerms }) || claim.claim_type === "product" && topicsIn(claim.claim).length > 0;
   const highRiskTopic = HIGH_RISK_TYPES.has(claim.claim_type) || ["statistic", "medical", "legal", "safety", "financing"].includes(claim.sensitive_topic);
   const contradicted = proposal?.verification_status === "CONTRADICTED";
   const notes = [proposal?.notes || ""];
@@ -35,7 +91,7 @@ export function enforceClaim(claim, proposal, evidence) {
   if (contradicted) {
     status = "CONTRADICTED";
     risk = "high";
-  } else if (proposal?.verification_status === "NOT_REQUIRED" && isStableGeneralKnowledge(claim)) {
+  } else if (!business && proposal?.verification_status === "NOT_REQUIRED" && isStableGeneralKnowledge(claim)) {
     // Stable, textbook technical/general knowledge (e.g. "panels produce DC",
     // "an inverter converts DC to AC"). The code gate never allows it for
     // business-specific, statistical, financial, legal, medical or sensitive
@@ -43,20 +99,20 @@ export function enforceClaim(claim, proposal, evidence) {
     status = "NOT_REQUIRED";
     risk = "low";
   } else if (business) {
-    if (categories.has("verified_fact")) {
+    // Business claims: ONLY a verified business fact that specifically matches
+    // the claim can back it. Client website (C*), client declarations and
+    // unverified facts (U*) and external sources never verify the business.
+    const matching = known.filter((id) => evidence.get(id).category === "verified_fact" && factSupportsClaim(claim.claim, evidence.get(id).item));
+    if (matching.length) {
       status = "VERIFIED";
       risk = "low";
-      sourceId = known.find((id) => evidence.get(id).category === "verified_fact");
+      sourceId = matching[0];
       source = "verified_business_fact";
-    } else if ((categories.has("crawler") || categories.has("unverified")) && !sensitive) {
-      status = "SUPPORTED";
-      risk = "medium";
-      sourceId = known.find((id) => ["crawler", "unverified"].includes(evidence.get(id).category));
-      source = evidence.get(sourceId).category === "crawler" ? "client_website" : "client_declared";
     } else {
       status = "UNVERIFIED";
       risk = "high";
-      if (sensitive && (categories.has("crawler") || categories.has("unverified"))) notes.push("Sensitive business claim needs a VERIFIED business fact; client website/profile is not sufficient.");
+      if (categories.has("verified_fact")) notes.push("Cited verified fact does not specifically support this business claim.");
+      if (categories.has("crawler") || categories.has("unverified") || categories.has("external")) notes.push("Business claim needs a matching VERIFIED business fact; client website, client declarations and external sources are not sufficient.");
     }
   } else if (categories.has("external")) {
     status = "SUPPORTED";
@@ -144,6 +200,79 @@ export function scanUnsupportedSpecifics(markdown, context) {
   }
   for (const match of text.matchAll(QUOTE_ATTRIBUTION)) findings.push({ code: "POSSIBLE_FAKE_QUOTE", severity: "major", value: match[0].slice(0, 120) });
   return findings;
+}
+
+function sentencesOf(markdown) {
+  return markdownToText(String(markdown || "").replace(/^#{1,6}\s+(.+)$/gm, "$1.")).split(/(?<=[.!?¿¡:;])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * UNVERIFIED BUSINESS FACT = NO PUBLIC COPY. Post-generation deterministic scan
+ * (before QA): the copy must not mention, hint at or rephrase business
+ * information that is only present in unverified facts / client declarations.
+ * - business topics (warranty, certification, financing, promotions,
+ *   experience, track record, savings) with no verified fact on that topic;
+ * - numbers taken from unverified facts (years, counts, percentages, kW…);
+ * - distinctive terms of unverified service/address facts inside a sentence
+ *   that speaks for the business.
+ */
+export function scanUnverifiedBusinessMentions(markdown, context) {
+  const verified = context.verified_facts || [];
+  const unverified = (context.unverified_data || []).filter((u) => u.kind === "business_fact" || u.kind === "client_profile" || u.kind === "website_profile");
+  const verifiedText = verified.map((f) => `${f.label} ${f.value}`).join(" ");
+  const verifiedTopics = new Set([...verified.map((f) => FACT_TYPE_TOPIC[f.type]), ...topicsIn(verifiedText)].filter(Boolean));
+  const verifiedTokens = new Set(tokens(verifiedText));
+  const brandTerms = [context.meta?.business_name, String(context.meta?.website_domain || "").split(".")[0]].filter(Boolean);
+  const unverifiedNumbers = new Set();
+  const distinctive = new Set();
+  for (const u of unverified) {
+    // Significant numbers only (years, counts, %, kW…); single digits are too generic.
+    for (const n of String(u.value || "").match(/\d+(?:[.,]\d+)?/g) || []) if (n.replace(/\D/g, "").length >= 2 && !verifiedText.includes(n)) unverifiedNumbers.add(n);
+    if (["service", "location", "address"].includes(u.type)) {
+      for (const t of tokens(u.value)) if (t.length > 4 && !verifiedTokens.has(t) && !STOP.has(t) && !/^\d/.test(t)) distinctive.add(t);
+    }
+  }
+  const findings = [];
+  const seen = new Set();
+  const push = (code, value, detail) => { const key = `${code}|${value}`; if (!seen.has(key)) { seen.add(key); findings.push({ code, severity: "blocker", value: value.slice(0, 200), detail }); } };
+  for (const sentence of sentencesOf(markdown)) {
+    for (const topic of topicsIn(sentence)) if (!verifiedTopics.has(topic)) push("UNVERIFIED_BUSINESS_TOPIC", sentence, topic);
+    const nums = sentence.replace(/^\s*\d+[.)]\s+/, "").match(/\d+(?:[.,]\d+)?/g) || [];
+    for (const n of nums) if (unverifiedNumbers.has(n) && !verifiedText.includes(n)) push("UNVERIFIED_BUSINESS_NUMBER", sentence, n);
+    if (isBusinessClaim({ claim: sentence }, { brandTerms })) {
+      const hit = tokens(sentence).find((t) => distinctive.has(t));
+      if (hit) push("UNVERIFIED_BUSINESS_DETAIL", sentence, hit);
+    }
+  }
+  return findings;
+}
+
+// Navigation / UI text is not a factual claim.
+const NAV_PHRASES = /^(mas informacion|informacion|ver mas|leer mas|conocenos|conoce mas|contacto|contactanos|inicio|home|servicios|nosotros|about|about us|learn more|read more|click aqui|haz clic|visita|visitanos|consulta|cotiza|cotizar|solicita|solicitar|agenda|agendar|llama|llamanos|escribenos|enviar|siguiente|anterior|menu|faq|preguntas frecuentes)\b/;
+
+/** True when an extracted "claim" is really navigation, a menu/CTA/button label, anchor text, breadcrumb or a UI heading. */
+export function isNonClaimText(claimText, markdown = "") {
+  const raw = String(claimText || "").trim();
+  if (!raw) return true;
+  const anchors = linksFromMarkdown(markdown).map((l) => normalizeForMatch(l.anchor));
+  const headings = headingsFromMarkdown(markdown).map((h) => normalizeForMatch(h.text));
+  const stripped = normalizeForMatch(raw.replace(/\[([^\]]+)\]\([^)]*\)/g, " ").replace(/https?:\/\/\S+/g, " ").replace(/[()]/g, " "))
+    .replace(/[.,]/g, " ").replace(/\s+/g, " ").trim();
+  const norm = normalizeForMatch(raw).replace(/[.,]/g, " ").replace(/\s+/g, " ").trim();
+  if (!stripped) return true; // only a link / URL
+  // Anything with numbers, an email or a business topic stays a claim (contact
+  // details, promises like "cotización gratis" must still be checked).
+  if (/\d|@/.test(stripped.replace(/\s/g, "")) || topicsIn(raw).length) return false;
+  if (anchors.includes(norm) || anchors.includes(stripped)) return true;
+  if (headings.includes(norm) || headings.includes(stripped)) return true; // UI heading, not an assertion
+  if (/[>›»|/]/.test(raw) && raw.split(/[>›»|/]/).every((p) => p.trim().split(/\s+/).length <= 4) && !/\d{3}/.test(raw)) return true; // breadcrumb
+  const words = stripped.split(" ").filter(Boolean);
+  // navigation lead-ins whose only object is a link/page ("Más información en: [Conócenos](…)")
+  if (NAV_PHRASES.test(stripped) && (/\]\(/.test(raw) || /https?:\/\//.test(raw) || words.length <= 5)) {
+    const rest = stripped.replace(NAV_PHRASES, "").replace(/\b(en|la|el|pagina|principal|nuestra|nuestro|sitio|web|aqui|de|del|para|mas|a|al|y|o|:)\b/g, " ").trim();
+    if (!rest || rest.split(/\s+/).length <= 3) return true;
+  }
+  return false;
 }
 
 // Editorial/meta language that must never appear in public copy: notes to the
