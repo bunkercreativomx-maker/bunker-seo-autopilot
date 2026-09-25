@@ -47,7 +47,7 @@ export default async function SearchConsolePage({ params, searchParams }: { para
             <div><p className="text-xs text-slate-500">Permission</p><p>{selected?.permission_level || "—"}</p></div>
             <div><p className="text-xs text-slate-500">Last Sync</p><p>{selected?.last_sync_at ? `${formatDateTime(selected.last_sync_at)} · ${selected.last_sync_status}` : "—"}</p></div>
             <div><p className="text-xs text-slate-500">Latest Data Date</p><p>{selected?.latest_final_date || "—"} {selected?.latest_final_date && <span className="text-xs text-slate-400">(finalized, Search Console / PT)</span>}</p></div>
-            <div><p className="text-xs text-slate-500">Connection Status</p><p>{selected ? <Badge tone={statusTone(selected.connection_status)}>{selected.connection_status}</Badge> : <Badge>not connected</Badge>} {selected && selected.status !== "active" && <Badge tone="red">{selected.status}</Badge>}</p></div>
+            <div><p className="text-xs text-slate-500">Connection Status</p><p>{selected ? <Badge tone={statusTone(selected.connection_status)}>{selected.connection_status}</Badge> : <Badge>not connected</Badge>} {selected && selected.status === "access_lost" && <Badge tone="red">access lost</Badge>}</p></div>
           </div>
           <p className="text-xs text-slate-500">Scopes: Search Console — Read Only{info.oauth.scopes.includes("email") ? " · account email (openid/email)" : ""}. Tokens are stored encrypted server-side and are never shown.</p>
           {info.oauth.testingMode && <p className="rounded bg-amber-50 p-2 text-xs text-amber-800">The Google OAuth app is in <b>Testing</b> mode: only Google accounts added as test users can connect, and refresh tokens expire after 7 days. Not yet available to external clients until Google verification is completed.</p>}
@@ -108,11 +108,11 @@ export default async function SearchConsolePage({ params, searchParams }: { para
                       <Badge>{p.property_type === "domain" ? "Domain" : "URL prefix"}</Badge>
                       <Badge>{p.permission_level}</Badge>
                       <Badge tone={matchTone(p.match_status)}>{matchLabel(p.match_status)}</Badge>
-                      {p.status !== "active" && <Badge tone="red">{p.status}</Badge>}
+                      {p.status === "access_lost" && <Badge tone="red">access lost</Badge>}
                       {p.mapped_to_this_website && <Badge tone="blue">selected for this website</Badge>}
                       {p.website && !p.mapped_to_this_website && <Badge tone="amber">mapped to another website</Badge>}
                     </div>
-                    {canManage && !p.mapped_to_this_website && p.match_status !== "mismatch" && p.status === "active" && !p.website && (
+                    {canManage && !p.mapped_to_this_website && p.match_status !== "mismatch" && p.status !== "access_lost" && !p.website && (
                       <AnalyticsForm action={selectPropertyAction} hidden={{ websiteId: id, propertyId: p.id }} submitLabel="Map to this website" variant="secondary" inline className="mt-2">
                         <label className="flex items-center gap-1 text-xs text-slate-600"><input type="checkbox" name="confirm" /> I confirm this property belongs to {website.domain}</label>
                         {p.match_status === "possible_match" && <Input name="confirmDomain" placeholder={`type ${website.domain}`} className="w-48" />}
