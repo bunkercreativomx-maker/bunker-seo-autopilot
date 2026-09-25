@@ -46,3 +46,4 @@ publisher-worker/node_modules/
 staging-site/node_modules/
 staging-site/.next/
 staging-site/.data/
+analytics-worker/node_modules/
