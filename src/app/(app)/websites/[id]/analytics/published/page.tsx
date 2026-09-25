@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/pocketbase/auth";
 import { getArticlePerformance } from "@/lib/pocketbase/analytics";
 import { Badge, Card, CardBody, EmptyState } from "@/components/ui";
-import { fmtInt, fmtPct, fmtPos } from "@/lib/analytics/format";
+import { fmtCtr, fmtInt, fmtPos } from "@/lib/analytics/format";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +34,7 @@ export default async function PublishedContentPage({ params }: { params: Promise
                     <>
                       <td className="px-3 py-2 text-right">{fmtInt(a!.totals!.clicks)}</td>
                       <td className="px-3 py-2 text-right">{fmtInt(a!.totals!.impressions)}</td>
-                      <td className="px-3 py-2 text-right">{fmtPct(a!.totals!.ctr, 2)}</td>
+                      <td className="px-3 py-2 text-right">{fmtCtr(a!.totals!.ctr, a!.totals!.impressions)}</td>
                       <td className="px-3 py-2 text-right">{fmtPos(a!.totals!.position)}</td>
                     </>
                   ) : (

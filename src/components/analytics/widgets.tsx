@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Card, CardBody } from "@/components/ui";
-import { fmtChange, fmtInt, fmtPct, fmtPos, toneClass } from "@/lib/analytics/format";
+import { fmtChange, fmtCtr, fmtInt, fmtPos, toneClass } from "@/lib/analytics/format";
 import { RANGE_OPTIONS, SOURCE_LABEL, type Change } from "@/lib/analytics/types";
 import { cn } from "@/lib/utils";
 
@@ -79,7 +79,7 @@ export function DailyChart({ daily }: { daily: Array<{ date: string; clicks: num
 }
 
 export function MetricsInline({ m }: { m: { clicks: number; impressions: number; ctr: number; position: number | null } }) {
-  return <span className="text-xs text-slate-600">{fmtInt(m.clicks)} clicks · {fmtInt(m.impressions)} impressions · CTR {fmtPct(m.ctr)} · avg. position {fmtPos(m.position)}</span>;
+  return <span className="text-xs text-slate-600">{fmtInt(m.clicks)} clicks · {fmtInt(m.impressions)} impressions · CTR {fmtCtr(m.ctr, m.impressions)} · avg. position {fmtPos(m.position)}</span>;
 }
 
 export function Pager({ base, page, perPage, total, params }: { base: string; page: number; perPage: number; total: number; params: Record<string, string> }) {

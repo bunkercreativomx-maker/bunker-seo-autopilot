@@ -8,7 +8,7 @@ import { Card, CardHeader, CardBody, Badge, statusTone, EmptyState, PageHeader, 
 import { formatDate } from "@/lib/format";
 import { archiveClientAction } from "@/app/actions/clients";
 import { getClientOverview } from "@/lib/pocketbase/analytics";
-import { fmtInt, fmtPct, fmtPos } from "@/lib/analytics/format";
+import { fmtCtr, fmtInt, fmtPos } from "@/lib/analytics/format";
 
 export const dynamic = "force-dynamic";
 
@@ -133,7 +133,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             <CardHeader title="Search Console — last 28 finalized days" subtitle="Source: Google Search Console. Totals are summed; CTR = total clicks / total impressions; position is shown per website." />
             <CardBody className="space-y-3 text-sm">
               <p>
-                <b>{fmtInt(gsc.aggregate.clicks)}</b> clicks · <b>{fmtInt(gsc.aggregate.impressions)}</b> impressions · CTR <b>{fmtPct(gsc.aggregate.ctr, 2)}</b>
+                <b>{fmtInt(gsc.aggregate.clicks)}</b> clicks · <b>{fmtInt(gsc.aggregate.impressions)}</b> impressions · CTR <b>{fmtCtr(gsc.aggregate.ctr, gsc.aggregate.impressions)}</b>
                 {gsc.aggregate.weightedPosition !== null && <span className="text-slate-500"> · impression-weighted avg. position {fmtPos(gsc.aggregate.weightedPosition)}</span>}
               </p>
               <ul className="divide-y divide-slate-100">
@@ -142,7 +142,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                     <Link className="text-sky-700" href={`/websites/${s.website.id}/analytics`}>{s.website.name}</Link>
                     {!s.connected ? <span className="text-xs text-slate-400">Search Console not connected</span>
                       : !s.totals ? <span className="text-xs text-slate-400">No data yet</span>
-                      : <span className="text-xs text-slate-600">{fmtInt(s.totals.clicks)} clicks · {fmtInt(s.totals.impressions)} impressions · CTR {fmtPct(s.totals.ctr, 2)} · avg. position {fmtPos(s.totals.position)}</span>}
+                      : <span className="text-xs text-slate-600">{fmtInt(s.totals.clicks)} clicks · {fmtInt(s.totals.impressions)} impressions · CTR {fmtCtr(s.totals.ctr, s.totals.impressions)} · avg. position {fmtPos(s.totals.position)}</span>}
                   </li>
                 ))}
               </ul>

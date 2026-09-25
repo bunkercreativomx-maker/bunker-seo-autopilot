@@ -5,7 +5,7 @@ import { Button, Card, CardBody, CardHeader, EmptyState, Input } from "@/compone
 import { DailyChart, MetricCard, RangeTabs, SourceNote } from "@/components/analytics/widgets";
 import { AnalyticsForm } from "@/components/analytics/analytics-form";
 import { qualityFlagAction } from "@/app/actions/analytics";
-import { fmtInt, fmtPct, fmtPos } from "@/lib/analytics/format";
+import { fmtCtr, fmtInt, fmtPos } from "@/lib/analytics/format";
 import { ANONYMIZED_NOTE } from "@/lib/analytics/types";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +28,18 @@ export default async function AnalyticsOverview({ params, searchParams }: { para
     );
   }
   if (!s.period) {
-    return <EmptyState title="No Search Console data yet" description="The property is mapped but no finalized data has been synced. Run a sync from the Search Console integration." action={<Link href={`/websites/${id}/search-console`}><Button variant="secondary">Sync</Button></Link>} />;
+    return (
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <MetricCard label="Clicks" value="0" />
+          <MetricCard label="Impressions" value="0" />
+          <MetricCard label="CTR" value="—" />
+          <MetricCard label="Average Position" value="—" />
+        </div>
+        <EmptyState title="No Search Console data yet" description={`Google Search Console has returned no finalized data for ${s.property?.site_url ?? "this property"}. Shown as zero, not as an error.${s.property?.last_sync_at ? " Last sync: " + s.property.last_sync_at.slice(0, 16) + " UTC." : ""}`} action={<Link href={`/websites/${id}/analytics/sync`}><Button variant="secondary">Sync history</Button></Link>} />
+        <SourceNote />
+      </div>
+    );
   }
   const t = s.totals!;
   return (
@@ -48,7 +59,7 @@ export default async function AnalyticsOverview({ params, searchParams }: { para
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCard label="Clicks" value={fmtInt(t.clicks)} change={s.comparison?.clicks} />
         <MetricCard label="Impressions" value={fmtInt(t.impressions)} change={s.comparison?.impressions} />
-        <MetricCard label="CTR" value={fmtPct(t.ctr, 2)} change={s.comparison?.ctr} kind="pct" />
+        <MetricCard label="CTR" value={fmtCtr(t.ctr, t.impressions)} change={s.comparison?.ctr} kind="pct" />
         <MetricCard label="Average Position" value={fmtPos(t.position)} change={s.comparison?.position} kind="pos" />
       </div>
       <p className="text-xs text-slate-500">

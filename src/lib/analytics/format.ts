@@ -10,6 +10,11 @@ export function fmtPct(n: number | null | undefined, digits = 1): string {
   return n === null || n === undefined || !Number.isFinite(n) ? "—" : `${(n * 100).toFixed(digits)}%`;
 }
 
+/** CTR is only meaningful with impressions: 0 impressions → "—" (never "0%"). */
+export function fmtCtr(ctr: number | null | undefined, impressions: number | null | undefined, digits = 2): string {
+  return !impressions ? "—" : fmtPct(ctr, digits);
+}
+
 /** Average position is a mean — always shown with one decimal, never as a rank. */
 export function fmtPos(n: number | null | undefined): string {
   return n === null || n === undefined || !Number.isFinite(n) || n === 0 ? "—" : n.toFixed(1);

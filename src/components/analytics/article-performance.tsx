@@ -1,5 +1,5 @@
 import { Card, CardBody, CardHeader } from "@/components/ui";
-import { fmtInt, fmtPct, fmtPos } from "@/lib/analytics/format";
+import { fmtCtr, fmtInt, fmtPos } from "@/lib/analytics/format";
 import type { ArticlePerformance } from "@/lib/analytics/types";
 
 /** Article → Search Performance (read-only, since publication). */
@@ -17,7 +17,7 @@ export function ArticleSearchPerformance({ perf }: { perf: ArticlePerformance | 
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
               <div><p className="text-xs text-slate-500">Clicks</p><p className="font-semibold">{fmtInt(perf.totals.clicks)}</p></div>
               <div><p className="text-xs text-slate-500">Impressions</p><p className="font-semibold">{fmtInt(perf.totals.impressions)}</p></div>
-              <div><p className="text-xs text-slate-500">CTR</p><p className="font-semibold">{fmtPct(perf.totals.ctr, 2)}</p></div>
+              <div><p className="text-xs text-slate-500">CTR</p><p className="font-semibold">{fmtCtr(perf.totals.ctr, perf.totals.impressions)}</p></div>
               <div><p className="text-xs text-slate-500">Average Position</p><p className="font-semibold">{fmtPos(perf.totals.position)}</p></div>
             </div>
             {(perf.topQueries ?? []).length > 0 && (
