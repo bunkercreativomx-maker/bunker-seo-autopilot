@@ -148,7 +148,7 @@ export async function processJob(pb, job, { env = process.env, key, oauth = {}, 
     await pb.collection("gsc_connections").update(connection.id, { last_refresh_at: nowIso(), last_error: "", updated_at: nowIso() });
     const latest = await client.latestFinalDate(property.site_url, todayPT());
     if (!latest.date) {
-      warnings.push({ code: "NO_DATA", message: "Search Console returned no finalized data for the last 14 days." });
+      warnings.push({ code: "NO_DATA", message: "Search Console returned no finalized data for this property in the available history (~16 months). This is reported as zero, not an error." });
       await pb.collection("gsc_properties").update(property.id, { last_verified_at: nowIso(), last_sync_at: nowIso(), last_sync_status: "completed_with_warnings", consecutive_failures: 0, source_timezone: SOURCE_TIMEZONE, updated_at: nowIso() });
       await progress(pb, job, { status: "completed_with_warnings", step: "No finalized data available", progress: 100, warnings, completed_at: nowIso(), api_requests: client.requests, data_state: "final" });
       await activity(pb, job, website, "GSC_SYNC_COMPLETED", { job: job.id, rows_stored: 0, warnings: warnings.map((w) => w.code) });

@@ -18,6 +18,7 @@ export default async function QueriesPage({ params, searchParams }: { params: Pr
   const data = await getQueries(pb, id, { range, page, perPage: 50, ...filters });
   const base = `/websites/${id}/analytics/queries`;
   if (!data?.connected) return <EmptyState title="Search Console not connected" action={<Link href={`/websites/${id}/search-console`}><Button>Connect</Button></Link>} />;
+  if (!data.period) return <EmptyState title="No Search Console data yet" description="Google Search Console has not reported finalized queries data for this property. This is shown as zero, not as an error." />;
   const keep: Record<string, string> = Object.fromEntries(Object.entries({ range, q: sp.q, page_url: sp.page_url, intent: sp.intent, brand: sp.brand, mapping: sp.mapping, sort: sp.sort }).filter(([, v]) => v)) as Record<string, string>;
 
   return (

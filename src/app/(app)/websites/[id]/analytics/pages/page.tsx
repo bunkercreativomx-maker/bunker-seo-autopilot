@@ -16,6 +16,7 @@ export default async function PagesPage({ params, searchParams }: { params: Prom
   const data = await getPages(pb, id, { range, page, perPage: 50, search: sp.q || "", sort: sp.sort || "clicks" });
   const base = `/websites/${id}/analytics/pages`;
   if (!data?.connected) return <EmptyState title="Search Console not connected" action={<Link href={`/websites/${id}/search-console`}><Button>Connect</Button></Link>} />;
+  if (!data.period) return <EmptyState title="No Search Console data yet" description="Google Search Console has not reported finalized pages data for this property. This is shown as zero, not as an error." />;
   const keep: Record<string, string> = Object.fromEntries(Object.entries({ range, q: sp.q, sort: sp.sort }).filter(([, v]) => v)) as Record<string, string>;
   return (
     <div className="space-y-4">

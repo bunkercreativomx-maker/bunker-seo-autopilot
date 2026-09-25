@@ -160,6 +160,11 @@ export class SearchConsoleClient {
     const fin = await this.queryAll(siteUrl, { startDate: start, endDate: today, dimensions: ["date"], dataState: "final", rowLimit: 100 });
     const dates = fin.rows.map((r) => r.keys?.[0]).filter(isDate).sort();
     if (dates.length) return { date: dates.at(-1), method: "final_rows" };
+    // Low-volume sites can go >14 days without impressions: probe the full
+    // Search Console history window (~16 months) before concluding "no data".
+    const hist = await this.queryAll(siteUrl, { startDate: addDays(today, -486), endDate: today, dimensions: ["date"], dataState: "final", rowLimit: 1000 });
+    const older = hist.rows.map((r) => r.keys?.[0]).filter(isDate).sort();
+    if (older.length) return { date: older.at(-1), method: "final_rows_history" };
     const all = await this.request("POST", `/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`, { startDate: start, endDate: today, dimensions: ["date"], dataState: "all", rowLimit: 100 }, "searchAnalytics.query");
     const fid = all?.metadata?.first_incomplete_date;
     if (isDate(fid)) return { date: addDays(fid, -1), method: "metadata_first_incomplete_date" };

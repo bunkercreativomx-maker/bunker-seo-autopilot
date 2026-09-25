@@ -26,7 +26,8 @@ function mockGoogle({ rows = 0, pageFail = [], tokenFail = null, scope = `openid
       const f = pageFail.shift();
       if (f) return f();
       if (body.dimensions.length === 1 && body.dimensions[0] === "date") {
-        return json(200, { rows: finalDates.map((d) => ({ keys: [d], clicks: 1, impressions: 10, ctr: 0.1, position: 5 })) });
+        const inRange = finalDates.filter((d) => d >= body.startDate && d <= body.endDate);
+        return json(200, { rows: inRange.map((d) => ({ keys: [d], clicks: 1, impressions: 10, ctr: 0.1, position: 5 })) });
       }
       const remaining = Math.max(0, rows - body.startRow);
       const n = Math.min(body.rowLimit, remaining);
@@ -117,6 +118,9 @@ test("latest finalized date detection uses final rows, never assumes yesterday",
   const empty = mockGoogle({ finalDates: [] });
   const r2 = await client(empty).latestFinalDate("sc-domain:example.com", "2026-09-24");
   assert.equal(r2.date, null);
+  // Low-volume site: last impression 3 months ago → found via the history probe, not reported as "no data".
+  const old = mockGoogle({ finalDates: ["2026-05-02", "2026-06-11"] });
+  assert.deepEqual(await client(old).latestFinalDate("sc-domain:example.com", "2026-09-24"), { date: "2026-06-11", method: "final_rows_history" });
 });
 
 test("date range validation rejects inverted / malformed ranges before calling Google", async () => {
