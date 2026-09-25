@@ -248,7 +248,11 @@ export function decide(signals, ctx) {
     if (!opp) continue;
     candidates.push({ s, opp, score: scoreOpportunity(opp) });
   }
-  candidates.sort((a, b) => b.score - a.score || String(a.opp.id).localeCompare(String(b.opp.id)));
+  // Human-approved topics always outrank auto-picked (proposed) ones.
+  // Auto-picked topics that would need a human decision are skipped quietly
+  // (next topic is tried) instead of flooding the inbox with review requests.
+  const quiet = (opp) => opp.status === "proposed" ? { decision_type: "NO_ACTION", priority: "low", requires_approval: false, planned_action: null } : { decision_type: "REQUEST_HUMAN_REVIEW", requires_approval: true };
+  candidates.sort((a, b) => (a.opp.status === "approved" ? 0 : 1) - (b.opp.status === "approved" ? 0 : 1) || b.score - a.score || String(a.opp.id).localeCompare(String(b.opp.id)));
   for (const { s, opp, score } of candidates) {
     const text = `${opp.keyword_text || ""} ${opp.title_suggestion || ""}`;
     const evidence = { ...s.evidence, score_inputs: { phase3_priority: opp.priority, intent: opp.intent || null, existing_page: opp.existing_page || null, confidence: opp.confidence ?? null } };
@@ -265,21 +269,23 @@ export function decide(signals, ctx) {
     const kw = normalizeText(opp.keyword_text || opp.title_suggestion);
     const dup = kw && ctx.articles.find((a) => a.status !== "rejected" && (normalizeText(a.primary_keyword) === kw || (opp.recommended_url && a.recommended_url && normalizeUrl(a.recommended_url) === normalizeUrl(opp.recommended_url))));
     if (dup) {
-      out.push(decision({ ...d, decision_type: "REQUEST_HUMAN_REVIEW", rule: "content.duplicate_intent", requires_approval: true, reason: `Article ${dup.id} already targets the same keyword/URL; creating another page would compete for the same intent.`, evidence: { ...evidence, duplicate_article: dup.id } }));
+      out.push(decision({ ...d, rule: "content.duplicate_intent", requires_approval: true, reason: `Article ${dup.id} already targets the same keyword/URL; creating another page would compete for the same intent.`, evidence: { ...evidence, duplicate_article: dup.id } , ...quiet(opp)}));
       continue;
     }
     const cannibal = kw && ctx.cannibalization.find((c) => c.keyword_norm && (c.keyword_norm === kw || kw.includes(c.keyword_norm) || c.keyword_norm.includes(kw)));
     if (cannibal) {
-      out.push(decision({ ...d, decision_type: "REQUEST_HUMAN_REVIEW", rule: "content.cannibalization", requires_approval: true, reason: `Open cannibalization issue "${cannibal.keyword_group}" overlaps this keyword; Autopilot will not add another page automatically.`, evidence: { ...evidence, cannibalization_issue: cannibal.id } }));
+      out.push(decision({ ...d, rule: "content.cannibalization", requires_approval: true, reason: `Open cannibalization issue "${cannibal.keyword_group}" overlaps this keyword; Autopilot will not add another page automatically.`, evidence: { ...evidence, cannibalization_issue: cannibal.id } , ...quiet(opp)}));
       continue;
     }
     const missing = missingFacts(text, ctx.facts.verified_types, { contentType: opp.recommended_page_type === "location_page" || opp.opportunity_type === "location" ? "location_page" : "", targetLocation: opp.target_location });
     if (missing.length) {
-      out.push(decision({ ...d, decision_type: "REQUEST_HUMAN_REVIEW", rule: "content.missing_business_facts", requires_approval: true, reason: `Missing verified business facts: ${missing.join(", ")}. Autopilot never invents or verifies business facts.`, evidence: { ...evidence, missing_facts: missing }, planned_action: { action_type: "NOTIFY_HUMAN", target_type: "content_opportunity", target_id: opp.id, idempotency_key: `notify:facts:${opp.id}`, task: { kind: "missing_facts", title: `Verify business facts: ${missing.join(", ")}` } } }));
+      out.push(decision({ ...d, rule: "content.missing_business_facts", requires_approval: true, reason: `Missing verified business facts: ${missing.join(", ")}. Autopilot never invents or verifies business facts.`, evidence: { ...evidence, missing_facts: missing }, planned_action: { action_type: "NOTIFY_HUMAN", target_type: "content_opportunity", target_id: opp.id, idempotency_key: `notify:facts:${opp.id}`, task: { kind: "missing_facts", title: `Verify business facts: ${missing.join(", ")}` } } , ...quiet(opp)}));
       continue;
     }
     const type = opp.existing_page ? "OPTIMIZE_EXISTING_CONTENT" : "CREATE_CONTENT";
-    plan({ ...d, decision_type: type, rule: "content.approved_opportunity", reason: `Approved Phase 3 ${opp.opportunity_type} opportunity "${opp.keyword_text || opp.title_suggestion}" ${opp.existing_page ? "on an existing page" : "with no mapped page"}; no existing article or duplicate intent.${d.risk_level === "high" ? " Regulated topic: draft allowed, publication always needs human review." : ""}` }, { action_type: "GENERATE_CONTENT", target_type: "content_opportunity", target_id: opp.id, idempotency_key: `generate:${ctx.website.id}:opp:${opp.id}` });
+    const auto = opp.status === "proposed";
+    plan({ ...d, decision_type: type, rule: auto ? "content.auto_picked_topic" : "content.approved_opportunity", reason: `${auto ? "Auto-picked (daily posts)" : "Approved"} Phase 3 ${opp.opportunity_type} opportunity "${opp.keyword_text || opp.title_suggestion}" ${opp.existing_page ? "on an existing page" : "with no mapped page"}; no existing article or duplicate intent.${d.risk_level === "high" ? " Regulated topic: draft allowed, publication always needs human review." : ""}` }, { action_type: "GENERATE_CONTENT", target_type: "content_opportunity", target_id: opp.id, idempotency_key: `generate:${ctx.website.id}:opp:${opp.id}` });
+    if (auto) break; // one auto-picked topic per evaluation; the rest wait for the next run
   }
 
   if (!out.length) out.push(decision({ decision_type: "NO_ACTION", priority: "monitor", rule: "no_signals", reason: "No active signals require action.", evidence: { signal_count: signals.length } }));

@@ -29,6 +29,7 @@ const DEFAULTS = {
   max_strategy_refresh_per_week: 1, max_crawls_per_week: 1, max_ai_budget_daily: 5, max_ai_budget_monthly: 50, max_ai_calls_daily: 60, max_ai_tokens_daily: 2_000_000,
   require_human_publish_approval: true, publish_after_human_approval: false, pause_on_high_risk: true, pause_on_fact_failure: true, pause_on_integration_error: true,
   cooldown_hours: 24, optimization_cooldown_days: 28, crawl_max_age_days: 14, strategy_max_age_days: 30, approval_reminder_days: 3, timezone: "America/Ciudad_Juarez",
+  auto_pick_opportunities: false,
 };
 
 export class Engine {
@@ -219,6 +220,14 @@ export class Engine {
     }
 
     const oppRows = await this.all("content_opportunities", `website = "${wid}" && status = "approved"`, { expand: "keyword", sort: "-created_at" });
+    // Simple mode: also consider PROPOSED topics of the latest strategy version
+    // (never skipped/reviewed ones). Approved topics always come first.
+    if (policy.auto_pick_opportunities && lastVersion) {
+      const proposed = await this.all("content_opportunities", `website = "${wid}" && status = "proposed" && strategy_version = "${esc(lastVersion.id)}" && existing_page = ""`, { expand: "keyword", sort: "-created_at" });
+      const rank = { high: 0, medium: 1, low: 2 };
+      proposed.sort((a, b) => (rank[a.priority] ?? 3) - (rank[b.priority] ?? 3));
+      oppRows.push(...proposed);
+    }
     const seenKw = new Set();
     const opportunities = [];
     for (const o of oppRows) {

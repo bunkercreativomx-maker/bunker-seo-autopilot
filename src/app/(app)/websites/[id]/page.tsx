@@ -2,13 +2,17 @@ import Link from "next/link";
 import { requireUser } from "@/lib/pocketbase/auth";
 import { getWebsite } from "@/lib/pocketbase/websites";
 import { getLatestJob, getLatestSnapshot, countOpenIssuesBySeverity, deriveHealth } from "@/lib/pocketbase/analysis";
-import { Card, CardHeader, CardBody, Badge, Button } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 import { AnalyzeButton } from "@/components/analyze-button";
 import { CrawlProgress } from "@/components/crawl-progress";
 import { formatDate } from "@/lib/format";
 import { archiveWebsiteAction } from "@/app/actions/websites";
-import { getPolicy, listActions, listRuns } from "@/lib/pocketbase/autopilot";
-import { ModeBadge } from "@/components/autopilot/autopilot-view";
+import { getPolicy } from "@/lib/pocketbase/autopilot";
+import { SiteRow } from "@/components/today/today-cards";
+import { StrategyGenerateButton } from "@/components/strategy-generate-button";
+import { isAdmin } from "@/lib/pocketbase/auth";
+import type { TodaySite } from "@/lib/pocketbase/today";
+import { statusTone } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -27,13 +31,11 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
   const website = await getWebsite(pb, id);
   if (!website) return null; // layout handles notFound
 
-  const [latestJob, snapshot, counts, ap, apRuns, apWaiting] = await Promise.all([
+  const [latestJob, snapshot, counts, ap] = await Promise.all([
     getLatestJob(pb, website.id),
     getLatestSnapshot(pb, website.id),
     countOpenIssuesBySeverity(pb, website.id),
     getPolicy(pb, website.id),
-    listRuns(pb, `website = "${website.id}" && dry_run = false`, 1),
-    listActions(pb, `website = "${website.id}" && status = "waiting_for_approval"`, 20),
   ]);
 
   const client = website.expand?.client;
@@ -53,97 +55,87 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
     ["Added", formatDate(website.created_at ?? website.created)],
   ];
 
+  const stratVersions = await pb.collection("strategy_versions").getList(1, 1, { filter: `website = "${website.id}"`, requestKey: null }).catch(() => null);
+  const hasPlan = (stratVersions?.totalItems ?? 0) > 0;
+  const pubInfo = website as unknown as { connection_status?: string; publishing_enabled?: boolean; publishing_environment?: string };
+  const connected = pubInfo.connection_status === "connected" && Boolean(pubInfo.publishing_enabled);
+  const posts = await pb.collection("articles").getList(1, 5, { filter: `website = "${website.id}" && status != "rejected"`, sort: "-updated", fields: "id,title,primary_keyword,status,qa_score", requestKey: null }).catch(() => null);
+  const site: TodaySite = {
+    id: website.id, name: website.name, domain: website.domain,
+    dailyOn: Boolean(ap?.policy.enabled) && ap?.policy.mode === "SUPERVISED" && ap?.policy.schedule === "daily",
+    autoPublish: Boolean(ap?.policy.publish_after_human_approval), paused: Boolean(ap?.policy.paused), connected,
+    environment: String(pubInfo.publishing_environment ?? ""), nextRunAt: String(ap?.policy.next_run_at ?? ""),
+  };
+  const steps = [
+    { done: hasAnalysis, label: "Read your website", hint: hasAnalysis ? `${snapshot?.total_pages ?? 0} pages found` : "We scan your pages (1–3 min)", action: !hasAnalysis || isRunning ? (isRunning && latestJob ? <CrawlProgress jobId={latestJob.id} /> : <AnalyzeButton websiteId={website.id} hasAnalyzed={hasAnalysis} />) : null },
+    { done: hasPlan, label: "Find what to write about", hint: hasPlan ? "Keyword plan ready" : "We pick topics your buyers search for", action: hasAnalysis && !hasPlan ? <StrategyGenerateButton websiteId={website.id} hasStrategy={false} /> : null },
+    { done: connected, label: "Connect your website", hint: connected ? `Publishing to ${pubInfo.publishing_environment === "staging" ? "staging" : "your site"}` : "Publish without copy/paste", action: !connected ? <Link href={`/websites/${website.id}/publishing`}><Button variant="secondary">Connect</Button></Link> : null },
+  ];
+  const ready = steps.every((st) => st.done);
+
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-      {/* Left: crawl + health */}
-      <Card className="lg:col-span-2">
-        <CardHeader
-          title="Analysis"
-          subtitle={latestJob ? `Last crawl: ${formatDate(latestJob.created_at ?? latestJob.created)}` : "Not analyzed yet"}
-          action={
-            <div className="flex items-center gap-2">
-              <Link href={`/websites/${website.id}/edit`}>
-                <Button variant="secondary">Edit Website</Button>
-              </Link>
-              <AnalyzeButton websiteId={website.id} hasAnalyzed={hasAnalysis} />
-            </div>
-          }
-        />
-        <CardBody className="space-y-4">
-          {isRunning && latestJob ? (
-            <CrawlProgress jobId={latestJob.id} />
-          ) : hasAnalysis ? (
-            <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
-              <Stat label="Pages" value={snapshot?.total_pages ?? 0} />
-              <Stat label="Indexable" value={snapshot?.indexable_pages ?? 0} />
-              <Stat label="Critical" value={snapshot?.critical_issues ?? 0} />
-              <Stat label="High" value={snapshot?.high_issues ?? 0} />
-              <Stat label="Medium" value={snapshot?.medium_issues ?? 0} />
-              <Stat label="Low" value={snapshot?.low_issues ?? 0} />
-              <Stat label="Opportunities" value={snapshot?.opportunities ?? 0} />
-              <Stat label="Total Issues" value={(snapshot?.total_issues ?? 0) || counts.total} />
-            </div>
-          ) : (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-10 text-center text-sm text-slate-500">
-              This website has not been analyzed yet. Press <strong>Analyze Website</strong> to crawl it,
-              discover pages, extract SEO data, and detect issues.
-            </div>
-          )}
+    <div className="mx-auto max-w-3xl space-y-6">
+      {/* Daily post switch */}
+      <div className={`rounded-2xl border p-5 ${site.dailyOn ? "border-emerald-200 bg-emerald-50/50" : "border-slate-200 bg-white"}`}>
+        <p className="text-base font-semibold text-slate-900">{site.dailyOn ? "Daily posts are on ✨" : "Daily posts"}</p>
+        <p className="mt-0.5 text-sm text-slate-500">
+          {site.dailyOn ? "Every morning a new post is written, fact-checked and scored. You approve it in Today." : ready ? "Turn it on and a new post will be ready for you every morning." : "Finish the setup below, then turn it on."}
+        </p>
+        <div className="mt-2 border-t border-slate-200/70"><SiteRow site={site} canEdit={isAdmin(user.role) && (ready || site.dailyOn)} /></div>
+      </div>
 
-          {latestJob?.status === "failed" && latestJob.error_message && (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700">
-              Last crawl failed: <code className="font-mono">{latestJob.error_message}</code>
-            </div>
-          )}
-        </CardBody>
-      </Card>
+      {/* Setup */}
+      {!ready && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <p className="text-sm font-semibold text-slate-900">Setup · {steps.filter((st) => st.done).length}/3</p>
+          <ol className="mt-3 space-y-3">
+            {steps.map((st, i) => (
+              <li key={st.label} className="flex items-center gap-3">
+                <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${st.done ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>{st.done ? "✓" : i + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <p className={`text-sm font-medium ${st.done ? "text-slate-500" : "text-slate-900"}`}>{st.label}</p>
+                  <p className="text-xs text-slate-500">{st.hint}</p>
+                </div>
+                {st.action}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
 
-      {/* Right: details */}
-      <Card>
-        <CardHeader title="Website Health" action={<Badge tone={healthTone(health)}>{health.replace(/_/g, " ")}</Badge>} />
-        <CardBody className="space-y-3">
-          {hasAnalysis ? (
-            <>
-              <div className="mb-2 space-y-1 text-xs text-slate-600">
-                <div>Open issues by severity (operational summary, not a ranking score):</div>
-              </div>
-              <IssueRow label="Critical" value={counts.critical} tone="red" />
-              <IssueRow label="High" value={counts.high} tone="amber" />
-              <IssueRow label="Medium" value={counts.medium} tone="amber" />
-              <IssueRow label="Low" value={counts.low} tone="slate" />
-              <IssueRow label="Opportunities" value={counts.opportunity} tone="blue" />
-              <Link href={`/websites/${website.id}/seo`} className="mt-3 inline-block text-sm font-medium text-sky-600 hover:text-sky-500">
-                View SEO issues →
-              </Link>
-            </>
-          ) : (
-            <p className="text-sm text-slate-500">Run an analysis to see the website health summary.</p>
-          )}
-        </CardBody>
-      </Card>
+      {/* Recent posts */}
+      <div className="rounded-2xl border border-slate-200 bg-white">
+        <div className="flex items-center justify-between px-5 pt-4">
+          <p className="text-sm font-semibold text-slate-900">Recent posts</p>
+          <Link href={`/websites/${website.id}/content`} className="text-xs font-medium text-sky-700 hover:underline">All posts →</Link>
+        </div>
+        <div className="divide-y divide-slate-100 px-5 py-2">
+          {(posts?.items ?? []).map((a) => (
+            <Link key={a.id} href={`/articles/${a.id}`} className="flex items-center gap-3 py-2.5 hover:opacity-80">
+              <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{String(a.title || a.primary_keyword || "Untitled")}</span>
+              <Badge tone={statusTone(String(a.status))}>{friendly(String(a.status))}</Badge>
+            </Link>
+          ))}
+          {(posts?.items.length ?? 0) === 0 && <p className="py-4 text-center text-sm text-slate-500">No posts yet.</p>}
+        </div>
+      </div>
 
-      {/* Autopilot (Phase 7) */}
-      <Card className="lg:col-span-3">
-        <CardHeader
-          title="Autopilot"
-          subtitle="Coordinates existing modules. Never approves content or publishes without a recorded human approval."
-          action={ap ? <ModeBadge mode={ap.policy.mode} enabled={ap.policy.enabled} paused={ap.policy.paused} orgPaused={ap.organization_paused} /> : <Badge>OFF</Badge>}
-        />
-        <CardBody>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Last run" value={apRuns[0] ? `${formatDate(apRuns[0].started_at || apRuns[0].created_at)} · ${apRuns[0].status}` : "Never"} />
-            <Stat label="Next run" value={ap?.policy.enabled && !ap.policy.paused && ap.policy.next_run_at ? formatDate(ap.policy.next_run_at) : ap?.policy.schedule === "manual_only" ? "Manual only" : "—"} />
-            <Stat label="Waiting approval" value={apWaiting.length} />
-            <Stat label="Actions (last run)" value={apRuns[0]?.action_count ?? 0} />
-          </div>
-          <Link href={`/websites/${website.id}/autopilot`} className="mt-3 inline-block text-sm font-medium text-sky-600 hover:text-sky-500">Open Autopilot →</Link>
-        </CardBody>
-      </Card>
+      {/* Website health (compact) */}
+      {hasAnalysis && (
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm">
+          <span className="font-medium text-slate-900">Website health</span>
+          <Badge tone={healthTone(health)}>{health.replace(/_/g, " ")}</Badge>
+          <span className="text-xs text-slate-500">{counts.critical + counts.high} important issues · last scan {formatDate(latestJob?.created_at ?? latestJob?.created)}</span>
+          <span className="ml-auto flex items-center gap-2">
+            <AnalyzeButton websiteId={website.id} hasAnalyzed />
+            <Link href={`/websites/${website.id}/seo`} className="text-xs font-medium text-sky-700 hover:underline">Details →</Link>
+          </span>
+        </div>
+      )}
 
-      {/* Full info */}
-      <Card className="lg:col-span-3">
-        <CardHeader title="Website Information" />
-        <CardBody>
+      <details className="rounded-2xl border border-slate-200 bg-white px-5 py-3">
+        <summary className="cursor-pointer text-sm font-medium text-slate-600">Website details</summary>
+        <div className="mt-3">
           <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
             {info.map(([label, value]) => (
               <div key={label}>
@@ -152,11 +144,12 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
               </div>
             ))}
           </dl>
-        </CardBody>
-      </Card>
+          <Link href={`/websites/${website.id}/edit`} className="mt-3 inline-block text-xs font-medium text-sky-700 hover:underline">Edit website →</Link>
+        </div>
+      </details>
 
       {user.role !== "viewer" && (
-        <div className="lg:col-span-3 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-5 py-4">
+        <div className="flex items-center justify-between rounded-2xl border border-rose-100 bg-rose-50/50 px-5 py-3">
           <div>
             <div className="text-sm font-medium text-rose-800">Archive this website</div>
             <div className="text-xs text-rose-600">Archived websites are hidden from active lists but kept for reference.</div>
@@ -171,21 +164,8 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
   );
 }
 
-function Stat({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-      <div className={typeof value === "number" ? "text-xl font-semibold text-slate-900" : "text-sm font-semibold text-slate-900"}>{value}</div>
-      <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
-    </div>
-  );
-}
-
-function IssueRow({ label, value, tone }: { label: string; value: number; tone: "red" | "amber" | "slate" | "blue" }) {
-  const color = { red: "text-rose-600", amber: "text-amber-600", slate: "text-slate-600", blue: "text-sky-600" }[tone];
-  return (
-    <div className="flex items-center justify-between border-b border-slate-100 pb-2 text-sm">
-      <span className="text-slate-600">{label}</span>
-      <span className={`font-semibold ${color}`}>{value}</span>
-    </div>
-  );
-}
+const FRIENDLY: Record<string, string> = {
+  awaiting_approval: "Ready for you", approved: "Approved", published: "Published", publish_queued: "Publishing", publishing: "Publishing",
+  needs_revision: "Needs a look", failed: "Failed", publish_failed: "Publish failed", unpublished: "Unpublished", draft: "Writing",
+};
+function friendly(s: string) { return FRIENDLY[s] ?? (s.includes("ing") || ["queued", "qa", "brief_ready"].includes(s) ? "Writing" : s.replace(/_/g, " ")); }

@@ -282,3 +282,20 @@ test("error classification: retries only TRANSIENT", () => {
 test("normalizeUrl matches trailing slash and www", () => {
   assert.equal(normalizeUrl("https://www.a.com/x/"), normalizeUrl("https://a.com/x"));
 });
+
+// ---------------------------------------------------------------- simple mode (daily posts)
+test("auto-pick: approved topics win; one proposed topic per run; review-needing proposed topics are skipped quietly", () => {
+  const c = ctx({ policy: { max_content_jobs_per_day: 3, max_content_jobs_per_week: 5 }, opportunities: [
+    opp({ id: "p1", status: "proposed", priority: "high", keyword_text: "precio paneles solares", title_suggestion: "Precio paneles", recommended_url: "/precio" }),
+    opp({ id: "p2", status: "proposed", priority: "high", keyword_text: "paneles solares comercios", title_suggestion: "Paneles comercios", recommended_url: "/comercios" }),
+    opp({ id: "p3", status: "proposed", priority: "medium", keyword_text: "energia solar casas", title_suggestion: "Casas", recommended_url: "/casas" }),
+    opp({ id: "a1", status: "approved", priority: "low", keyword_text: "mantenimiento paneles", title_suggestion: "Mantenimiento", recommended_url: "/mantenimiento" }),
+  ] });
+  const d = run(c);
+  const gen = d.filter((x) => x.planned_action?.action_type === "GENERATE_CONTENT" && !x.planned_action.blocked);
+  assert.deepEqual(gen.map((x) => x.planned_action.target_id).sort(), ["a1", "p2"]);
+  assert.equal(gen.find((x) => x.planned_action.target_id === "p2").rule, "content.auto_picked_topic");
+  assert.ok(!d.some((x) => x.decision_type === "REQUEST_HUMAN_REVIEW"), "no review spam for auto-picked topics");
+  assert.ok(d.some((x) => x.signal?.source_record === "p1" && x.decision_type === "NO_ACTION" && x.rule === "content.missing_business_facts"));
+  assert.ok(!gen.some((x) => x.planned_action.target_id === "p3"));
+});

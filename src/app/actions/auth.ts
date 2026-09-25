@@ -32,7 +32,7 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   cookieStore.delete(AUTH_COOKIE);
   cookieStore.set(AUTH_COOKIE, serializeSession(pb.authStore.token), sessionCookieOptions());
 
-  redirect("/dashboard");
+  redirect("/today");
 }
 
 export async function logout(): Promise<void> {

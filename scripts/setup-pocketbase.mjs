@@ -1324,6 +1324,7 @@ async function main() {
     { name: "max_ai_tokens_daily", type: "number", min: 0, onlyInt: true },
     { name: "require_human_publish_approval", type: "bool" },
     { name: "publish_after_human_approval", type: "bool" },
+    { name: "auto_pick_opportunities", type: "bool" },
     { name: "publish_after_approval_since", type: "date", required: false },
     { name: "pause_on_high_risk", type: "bool" },
     { name: "pause_on_fact_failure", type: "bool" },

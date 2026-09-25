@@ -88,11 +88,17 @@ const BODY_REST = [
   "La instalación se programa en horarios sin servicio para no interrumpir la operación del local. El equipo coordina con el encargado los cortes de energía necesarios y deja el sistema funcionando antes de la apertura.",
   "Después de instalar, el personal puede revisar la producción diaria desde el inversor. La grasa y el polvo del ambiente hacen recomendable una limpieza de módulos más frecuente que en una vivienda.",
 ];
+const BODY_GYM = [
+  "Un gimnasio tiene horarios largos, caminadoras eléctricas, iluminación y aire acondicionado encendidos buena parte del día. Por eso conviene revisar primero el recibo de luz y detectar en qué horas se concentra el gasto.",
+  "La azotea de un gimnasio suele ser amplia y plana, lo que facilita acomodar los módulos. En la visita técnica se revisan las sombras de edificios vecinos y la ruta del cableado hasta el tablero principal.",
+  "La instalación se coordina en horarios de menor afluencia para que los socios puedan seguir entrenando. Al terminar se explica al encargado cómo leer la producción en la pantalla del inversor.",
+  "El polvo y la lluvia ensucian los módulos con el tiempo. Una limpieza programada y una revisión anual de conexiones mantienen el sistema produciendo de forma estable.",
+];
 function draft(ev, note = "") {
   const phone = ev.verified_facts?.find((f) => f.type === "phone")?.value || "";
   const kw = String(ev.meta?.primary_keyword || "");
-  const B = /restaurant/.test(kw) ? BODY_REST : BODY;
-  const h1 = /restaurant/.test(kw) ? "Paneles solares para restaurantes: lo que hay que revisar" : "Paneles solares para comercios: cómo empezar";
+  const B = /gimnas/.test(kw) ? BODY_GYM : /restaurant/.test(kw) ? BODY_REST : BODY;
+  const h1 = /gimnas/.test(kw) ? "Paneles solares para gimnasios: qué revisar" : /restaurant/.test(kw) ? "Paneles solares para restaurantes: lo que hay que revisar" : "Paneles solares para comercios: cómo empezar";
   return [`# ${h1}`, "", B[0], "", "## Qué revisar antes de instalar", "", B[1], "", "## Cómo es el proceso", "", B[2], "", "## Mantenimiento", "", B[3] + (note ? ` ${note}` : ""), "", "## Contacto", "", `Para una visita técnica llama al ${phone}.`].join("\n");
 }
 function makeProvider() {
@@ -693,4 +699,45 @@ test("P7 audit: no secrets in autopilot records or logs", async () => {
   ]);
   assert.ok(!dump.includes(secret));
   assert.ok(!dump.includes(ADMIN_PASSWORD));
+});
+
+// ================================================================= SIMPLE MODE (daily posts)
+test("P7 simple mode: daily post auto-picks a PROPOSED topic, writes it, still waits for human approval", async () => {
+  const w3 = (await mkWebsite(ids.orgA, ids.cA, "daily")).id;
+  const T = { organization: ids.orgA, client: ids.cA, website: w3 };
+  await admin.collection("business_facts").create({ ...T, fact_type: "phone", label: "Teléfono", value: "656 695 3960", source: "user", verified: true, verification_state: "verified", provenance: "user_provided", created_at: NOW() });
+  const s = await strategyFixture(T);
+  const pFacts = await s.opp("precio de paneles solares", { status: "proposed" });
+  const pGood = await s.opp("paneles solares para gimnasios", { status: "proposed" }); // distinct fixture body
+  const pOther = await s.opp("paneles solares para hoteles", { status: "proposed", priority: "medium" });
+  // Off by default: proposed topics are ignored.
+  await ap("admin", "policy/save", { websiteId: w3, mode: "SUPERVISED", enabled: true, schedule: "daily", maxContentJobsPerDay: 1, maxContentJobsPerWeek: 7 });
+  let run = await runAndProcess("admin", w3);
+  assert.equal(await count("articles", `website = "${w3}"`), 0, "auto-pick off → nothing generated from proposed topics");
+  // Editor cannot turn it on; admin can.
+  await rejects(ap("editor", "policy/save", { websiteId: w3, autoPickOpportunities: true }), "FORBIDDEN");
+  const saved = await ap("admin", "policy/save", { websiteId: w3, autoPickOpportunities: true });
+  assert.equal(saved.policy.auto_pick_opportunities, true);
+  assert.ok(saved.policy.next_run_at, "daily schedule has a next run");
+  assert.equal(new Date(saved.policy.next_run_at).getUTCHours(), 13, "next morning ~7:00 Juárez");
+  run = await runAndProcess("admin", w3);
+  const gen = await list("autopilot_actions", `run = "${run.id}" && action_type = "GENERATE_CONTENT"`);
+  assert.equal(gen.length, 1, "exactly one post per day");
+  assert.equal(gen[0].target_id, pGood, "skips topic that needs unverified facts (price) quietly");
+  const spam = await list("autopilot_tasks", `website = "${w3}" && status = "open" && kind != "article_approval"`);
+  assert.equal(spam.length, 0, `no review spam: ${JSON.stringify(spam.map((t) => [t.kind, t.title]))}`);
+  const opp = await admin.collection("content_opportunities").getOne(pGood);
+  assert.equal(opp.status, "approved");
+  assert.ok((await count("activity_logs", `website = "${w3}" && action = "OPPORTUNITY_AUTO_SELECTED" && entity_id = "${pGood}"`)) === 1, "auto-selection audited");
+  assert.equal((await admin.collection("content_opportunities").getOne(pFacts)).status, "proposed");
+  assert.equal((await admin.collection("content_opportunities").getOne(pOther)).status, "proposed");
+  await runContentJobs(gen[0].article);
+  const art = await admin.collection("articles").getOne(gen[0].article);
+  assert.equal(art.status, "awaiting_approval", `qa=${art.qa_status} fc=${art.fact_check_status} flags=${JSON.stringify(art.flags)} summary=${JSON.stringify(art.qa_summary).slice(0, 600)}`);
+  assert.equal(art.approved_by, "", "still never self-approves");
+  assert.equal(await count("publish_jobs", `website = "${w3}"`), 0);
+  // Same day again: daily limit → no second post.
+  const again = await runAndProcess("admin", w3);
+  assert.equal(await count("autopilot_actions", `run = "${again.id}" && action_type = "GENERATE_CONTENT" && status = "running"`), 0);
+  await ap("admin", "policy/save", { websiteId: w3, enabled: false });
 });

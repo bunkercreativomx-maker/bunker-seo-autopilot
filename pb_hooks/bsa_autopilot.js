@@ -54,6 +54,9 @@ const DEFAULT_POLICY = {
   pause_on_high_risk: true, pause_on_fact_failure: true, pause_on_integration_error: true,
   cooldown_hours: 24, optimization_cooldown_days: 28, crawl_max_age_days: 14, strategy_max_age_days: 30,
   approval_reminder_days: 3, timezone: "America/Ciudad_Juarez",
+  // Simple mode: Autopilot picks the next best Phase 3 topic itself (topic
+  // selection only — the generated ARTICLE still needs human approval).
+  auto_pick_opportunities: false,
 };
 const LIMIT_BOUNDS = {
   max_actions_per_day: [0, 50], max_content_jobs_per_day: [0, 5], max_content_jobs_per_week: [0, 20], max_publications_per_week: [0, 20],
@@ -109,7 +112,14 @@ function publicPolicy(p, website) {
 
 function nextRunFrom(schedule, from) {
   if (schedule === "manual_only") return "";
-  const ms = schedule === "daily" ? 86400000 : 7 * 86400000;
+  if (schedule === "daily") {
+    // Daily posts: next morning ~7:00 Ciudad Juárez (13:00 UTC).
+    const d = new Date(from ? Date.parse(from) : Date.now());
+    const next = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 13, 0, 0));
+    if (next.getTime() <= d.getTime()) next.setUTCDate(next.getUTCDate() + 1);
+    return next.toISOString();
+  }
+  const ms = 7 * 86400000;
   return new Date((from ? Date.parse(from) : Date.now()) + ms).toISOString();
 }
 
@@ -183,6 +193,7 @@ function validatePolicyInput(body, current) {
     if (body[camel] !== undefined) out[k] = moneyIn(body[camel], k);
   }
   if (body.publishAfterHumanApproval !== undefined) out.publish_after_human_approval = body.publishAfterHumanApproval === true;
+  if (body.autoPickOpportunities !== undefined) out.auto_pick_opportunities = body.autoPickOpportunities === true;
   // Phase 7 invariants: human publish approval and pause guards cannot be disabled.
   if (body.requireHumanPublishApproval === false) L.fail(400, "INVALID", "Human publish approval cannot be disabled in Phase 7.");
   if (body.pauseOnHighRisk === false) L.fail(400, "INVALID", "High-risk content always stops Autopilot in Phase 7.");
@@ -210,7 +221,7 @@ function consequences(p, website) {
   else {
     if (allowed.indexOf("CRAWL") !== -1) can.push("Refresh a stale crawl (max " + p.max_crawls_per_week + "/week)");
     if (allowed.indexOf("STRATEGY_REFRESH") !== -1) can.push("Refresh a stale strategy (max " + p.max_strategy_refresh_per_week + "/week)");
-    if (allowed.indexOf("GENERATE_CONTENT") !== -1) can.push("Generate drafts from APPROVED opportunities (max " + p.max_content_jobs_per_day + "/day, " + p.max_content_jobs_per_week + "/week)");
+    if (allowed.indexOf("GENERATE_CONTENT") !== -1) can.push("Generate drafts from " + (p.auto_pick_opportunities ? "the best Phase 3 topics it picks itself" : "APPROVED opportunities") + " (max " + p.max_content_jobs_per_day + "/day, " + p.max_content_jobs_per_week + "/week)");
     if (allowed.indexOf("REQUEST_REVISION") !== -1) can.push("Request up to " + p.max_revision_jobs_per_article + " automatic Phase 4 revision(s) per article");
     if (allowed.indexOf("RECHECK_CONTENT") !== -1) can.push("Re-run fact check / QA on drafts");
   }
@@ -595,6 +606,14 @@ function internalExecute(body) {
   if (type === "GENERATE_CONTENT") {
     const opp = L.getOne("content_opportunities", target);
     if (!opp || opp.website !== website.id) L.fail(404, "NOT_FOUND", "Opportunity not found for this website.");
+    if (opp.status === "proposed") {
+      // Topic auto-selection (simple mode). Only topic choice is delegated; the
+      // article itself still goes through Fact Check, QA and HUMAN approval.
+      if (!policy.auto_pick_opportunities) L.fail(409, "NOT_APPROVED", "Opportunity is not approved and auto topic selection is off.");
+      L.updateRec("content_opportunities", opp.id, { status: "approved", overridden_by: actor.id, overridden_at: L.now(), override_reason: "Auto-selected by Autopilot daily posts (policy v" + policy.version + ")" });
+      L.logActivity($app, { organization: website.organization, client: website.client, website: website.id, user: actor.id, action: "OPPORTUNITY_AUTO_SELECTED", entity_type: "content_opportunity", entity_id: opp.id, metadata: { via: "autopilot", autopilot_action: action.id, policy_version: policy.version } });
+      opp.status = "approved";
+    }
     const client = L.getOne("clients", website.client);
     const inputs = generationDefaults(opp, website, client);
     // Phase 4 entry point: approval-state, duplicate generation_key, rate
