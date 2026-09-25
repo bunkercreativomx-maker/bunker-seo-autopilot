@@ -22,6 +22,30 @@ waiting for an external system to accumulate data.
 - Tests 319/319, lint, typecheck, production build; tenant isolation and OAuth security suites pass.
 - tlalocsolfuturo.com was not modified (no content, deploy, repo push, publishing, sitemap or robots change).
 
+## Final regression — commit `e5c6408` (validated 2026-09-25)
+Full regression suite run on a clean checkout of `e5c6408` (no code changes):
+
+| Suite | Result |
+|---|---|
+| Phase 1 | 15/15 |
+| Phase 2 | 7/7 |
+| Phase 3 | 9/9 |
+| Phase 4 | 21/21 |
+| Auth | 18/18 |
+| Strategy worker | 74/74 |
+| Content worker | 40/40 |
+| Phase 5 | 20/20 |
+| Publisher (SSRF, HMAC/replay) | 24/24 |
+| Phase 6 integration (OAuth, sync, tenant isolation) | 22/22 |
+| Analytics worker | 33/33 |
+| Local-only guard | 2/2 |
+| Crawler | 34/34 |
+| **Total** | **319 passed, 0 failed** |
+
+- Lint: pass (0 errors; 1 non-blocking warning: unused variable `nq` in `analytics-worker/src/analytics.js:238`).
+- Typecheck: pass (dashboard + staging-site).
+- Production build: pass.
+
 ## Follow-up: `GSC_REAL_DATA_VALIDATION_PENDING`
 Not a Phase 6 blocker. Does not reopen Phase 6 unless it reveals a real bug.
 
