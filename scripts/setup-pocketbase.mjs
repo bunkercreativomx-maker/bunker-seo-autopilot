@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Bunker SEO Autopilot — PocketBase schema bootstrap (Phases 1–5).
+ * Bunker SEO Autopilot — PocketBase schema bootstrap (Phases 1–7).
  * Creates/updates the multi-tenant collections and access rules idempotently.
  *
  * Usage:
@@ -1287,6 +1287,341 @@ async function main() {
   });
 
 
+  // ================================================================ Phase 7
+  // Autopilot orchestration. Every collection is written ONLY by pb_hooks
+  // (user-scoped /api/bsa/autopilot/* endpoints) or the bunker-seo-autopilot
+  // worker (superuser). Users read their own organization's rows.
+  const AP_MODES = ["OFF", "OBSERVE", "SUPERVISED", "FULL_AUTO"]; // FULL_AUTO reserved, rejected by hooks (Phase 7)
+  const AP_ACTIONS = ["CRAWL", "STRATEGY_REFRESH", "GENERATE_CONTENT", "RECHECK_CONTENT", "REQUEST_REVISION", "PUBLISH", "VERIFY_PUBLICATION", "UPDATE_PUBLICATION", "CREATE_ANALYTICS_OPPORTUNITY", "NOTIFY_HUMAN", "WAIT"];
+  const AP_RUN_STATUS = ["queued", "collecting_signals", "evaluating", "planning", "executing", "waiting_for_approval", "monitoring", "paused", "completed", "completed_with_warnings", "failed", "cancelled"];
+  const AP_TRIGGERS = ["scheduled", "manual", "dry_run", "crawl_completed", "strategy_completed", "gsc_sync_completed", "article_approved", "article_ready", "article_rejected", "content_job_finished", "publication_completed", "publication_failed", "content_recheck_completed", "analytics_opportunity_created", "follow_up"];
+  const AP_SIGNALS = ["TECHNICAL_ISSUE", "CONTENT_GAP", "NEW_CONTENT_OPPORTUNITY", "STRIKING_DISTANCE", "LOW_CTR", "CONTENT_DECAY", "NEW_QUERY", "PAGE_QUERY_MISMATCH", "POTENTIAL_CANNIBALIZATION", "GROWING_PAGE", "GROWING_QUERY", "PUBLICATION_FAILED", "GSC_CONNECTION_LOST", "STALE_CRAWL", "STALE_STRATEGY", "ARTICLE_NEEDS_REVIEW", "ARTICLE_APPROVED", "PUBLICATION_UNVERIFIED"];
+  const AP_DECISIONS = ["NO_ACTION", "REFRESH_CRAWL", "REFRESH_STRATEGY", "CREATE_CONTENT", "OPTIMIZE_EXISTING_CONTENT", "REVIEW_METADATA", "INVESTIGATE_TECHNICAL_ISSUE", "WAIT_FOR_MORE_DATA", "PAUSE_INTEGRATION", "PUBLISH_APPROVED_ARTICLE", "VERIFY_PUBLICATION", "RECHECK_ARTICLE", "REQUEST_HUMAN_REVIEW", "MONITOR"];
+  const AP_ACTION_STATUS = ["planned", "blocked", "waiting_for_approval", "queued", "running", "completed", "completed_with_warnings", "failed", "skipped", "cancelled"];
+  const AP_PRIORITY = ["critical", "high", "medium", "low", "monitor"];
+  const AP_ERROR_CLASS = ["TRANSIENT", "CONFIGURATION", "AUTH", "POLICY", "DATA", "CONTENT", "SECURITY", "UNKNOWN"];
+
+  await ensureCollection("autopilot_policies", [
+    ...tenantFields(),
+    { name: "enabled", type: "bool" },
+    { name: "mode", type: "select", values: AP_MODES, maxSelect: 1, required: true },
+    { name: "paused", type: "bool" },
+    { name: "paused_reason", type: "text", max: 500 },
+    { name: "paused_at", type: "date", required: false },
+    { name: "schedule", type: "select", values: ["daily", "weekly", "manual_only"], maxSelect: 1, required: true },
+    { name: "allowed_actions", type: "json" },
+    { name: "allowed_environments", type: "json" },
+    { name: "max_actions_per_day", type: "number", min: 0, onlyInt: true },
+    { name: "max_content_jobs_per_day", type: "number", min: 0, onlyInt: true },
+    { name: "max_content_jobs_per_week", type: "number", min: 0, onlyInt: true },
+    { name: "max_publications_per_week", type: "number", min: 0, onlyInt: true },
+    { name: "max_revision_jobs_per_article", type: "number", min: 0, onlyInt: true },
+    { name: "max_strategy_refresh_per_week", type: "number", min: 0, onlyInt: true },
+    { name: "max_crawls_per_week", type: "number", min: 0, onlyInt: true },
+    { name: "max_ai_budget_daily", type: "number", min: 0 },
+    { name: "max_ai_budget_monthly", type: "number", min: 0 },
+    { name: "max_ai_calls_daily", type: "number", min: 0, onlyInt: true },
+    { name: "max_ai_tokens_daily", type: "number", min: 0, onlyInt: true },
+    { name: "require_human_publish_approval", type: "bool" },
+    { name: "publish_after_human_approval", type: "bool" },
+    { name: "publish_after_approval_since", type: "date", required: false },
+    { name: "pause_on_high_risk", type: "bool" },
+    { name: "pause_on_fact_failure", type: "bool" },
+    { name: "pause_on_integration_error", type: "bool" },
+    { name: "cooldown_hours", type: "number", min: 0, onlyInt: true },
+    { name: "optimization_cooldown_days", type: "number", min: 0, onlyInt: true },
+    { name: "crawl_max_age_days", type: "number", min: 1, onlyInt: true },
+    { name: "strategy_max_age_days", type: "number", min: 1, onlyInt: true },
+    { name: "approval_reminder_days", type: "number", min: 1, onlyInt: true },
+    { name: "timezone", type: "text", max: 60 },
+    { name: "version", type: "number", min: 0, onlyInt: true },
+    { name: "next_run_at", type: "date", required: false },
+    { name: "last_run_at", type: "date", required: false },
+    { name: "created_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "updated_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "autopilot_policies",
+    indexes: ["CREATE UNIQUE INDEX idx_autopilot_policies_website ON autopilot_policies (website)"],
+  });
+
+  // Organization kill switch (AUTOPILOT_PAUSED) — one row per organization.
+  await ensureCollection("autopilot_controls", [
+    { name: "organization", type: "relation", maxSelect: 1, collectionId: rel("organizations"), required: true, cascadeDelete: true },
+    { name: "paused", type: "bool" },
+    { name: "reason", type: "text", max: 500 },
+    { name: "paused_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "paused_at", type: "date", required: false },
+    { name: "resumed_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "resumed_at", type: "date", required: false },
+    ...timestamps(),
+    ...autodates(),
+  ], {
+    listRule: "organization.id = @request.auth.organization.id",
+    viewRule: "organization.id = @request.auth.organization.id",
+    createRule: null, updateRule: null, deleteRule: null,
+  }, { bareName: "autopilot_controls", indexes: ["CREATE UNIQUE INDEX idx_autopilot_controls_org ON autopilot_controls (organization)"] });
+
+  await ensureCollection("autopilot_runs", [
+    ...tenantFields(),
+    { name: "policy", type: "relation", maxSelect: 1, collectionId: rel("autopilot_policies"), required: false, cascadeDelete: false },
+    { name: "trigger", type: "select", values: AP_TRIGGERS, maxSelect: 1, required: true },
+    { name: "trigger_ref", type: "text", max: 200 },
+    { name: "dry_run", type: "bool" },
+    { name: "status", type: "select", values: AP_RUN_STATUS, maxSelect: 1, required: true },
+    { name: "mode", type: "text", max: 20 },
+    { name: "started_at", type: "date", required: false },
+    { name: "completed_at", type: "date", required: false },
+    { name: "current_step", type: "text", max: 200 },
+    { name: "signal_count", type: "number", min: 0, onlyInt: true },
+    { name: "decision_count", type: "number", min: 0, onlyInt: true },
+    { name: "action_count", type: "number", min: 0, onlyInt: true },
+    { name: "estimated_ai_cost", type: "number", min: 0 },
+    { name: "actual_ai_cost", type: "number", min: 0 },
+    { name: "ai_cost_status", type: "select", values: ["known", "unknown", "none"], maxSelect: 1 },
+    { name: "ai_usage", type: "json" },
+    { name: "policy_snapshot", type: "json" },
+    { name: "result", type: "json" },
+    { name: "reason", type: "text", max: 2000 },
+    { name: "error_code", type: "text", max: 80 },
+    { name: "error_message", type: "text", max: 1000 },
+    { name: "parent_run", type: "text", max: 15 },
+    { name: "follow_up_requested", type: "bool" },
+    { name: "lease_owner", type: "text", max: 100 },
+    { name: "lease_until", type: "date", required: false },
+    { name: "requested_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "autopilot_runs",
+    indexes: [
+      "CREATE INDEX idx_autopilot_runs_website ON autopilot_runs (website, created_at)",
+      "CREATE INDEX idx_autopilot_runs_status ON autopilot_runs (status, created_at)",
+      // Single active (hot) run per website; parked runs (waiting/monitoring) and dry runs excluded.
+      "CREATE UNIQUE INDEX idx_autopilot_runs_active_website ON autopilot_runs (website) WHERE dry_run = FALSE AND status IN ('queued', 'collecting_signals', 'evaluating', 'planning', 'executing')",
+    ],
+  });
+
+  await ensureCollection("autopilot_signals", [
+    ...tenantFields(),
+    { name: "source", type: "select", values: ["crawler", "strategy", "content", "publishing", "search_console", "manual", "system"], maxSelect: 1, required: true },
+    { name: "source_record", type: "text", max: 200 },
+    { name: "signal_type", type: "select", values: AP_SIGNALS, maxSelect: 1, required: true },
+    { name: "evidence", type: "json" },
+    { name: "strength", type: "number", min: 0, max: 1 },
+    { name: "detected_at", type: "date", required: false },
+    { name: "last_seen_at", type: "date", required: false },
+    { name: "seen_count", type: "number", min: 0, onlyInt: true },
+    { name: "expires_at", type: "date", required: false },
+    { name: "status", type: "select", values: ["active", "resolved", "expired", "ignored", "snoozed"], maxSelect: 1, required: true },
+    { name: "snoozed_until", type: "date", required: false },
+    { name: "status_reason", type: "text", max: 500 },
+    { name: "decided_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "dedup_key", type: "text", max: 300, required: true },
+    { name: "last_run", type: "text", max: 15 },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "autopilot_signals",
+    indexes: [
+      "CREATE UNIQUE INDEX idx_autopilot_signals_dedup ON autopilot_signals (website, dedup_key)",
+      "CREATE INDEX idx_autopilot_signals_website_status ON autopilot_signals (website, status, signal_type)",
+    ],
+  });
+
+  await ensureCollection("autopilot_decisions", [
+    ...tenantFields(),
+    { name: "run", type: "relation", maxSelect: 1, collectionId: rel("autopilot_runs"), required: true, cascadeDelete: false },
+    { name: "signal", type: "text", max: 15 },
+    { name: "decision_type", type: "select", values: AP_DECISIONS, maxSelect: 1, required: true },
+    { name: "priority", type: "select", values: AP_PRIORITY, maxSelect: 1, required: true },
+    { name: "score", type: "number" },
+    { name: "evidence", type: "json" },
+    { name: "reason", type: "text", max: 2000 },
+    { name: "rule", type: "text", max: 200 },
+    { name: "block_code", type: "text", max: 80 },
+    { name: "planned_action", type: "json" },
+    { name: "explanation", type: "text", max: 2000 },
+    { name: "policy_snapshot", type: "json" },
+    { name: "risk_level", type: "select", values: ["low", "medium", "high"], maxSelect: 1 },
+    { name: "requires_approval", type: "bool" },
+    { name: "status", type: "select", values: ["proposed", "planned", "executed", "skipped", "blocked", "dry_run"], maxSelect: 1, required: true },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "autopilot_decisions",
+    indexes: ["CREATE INDEX idx_autopilot_decisions_run ON autopilot_decisions (run, created_at)", "CREATE INDEX idx_autopilot_decisions_website ON autopilot_decisions (website, created_at)"],
+  });
+
+  await ensureCollection("autopilot_actions", [
+    ...tenantFields(),
+    { name: "run", type: "relation", maxSelect: 1, collectionId: rel("autopilot_runs"), required: true, cascadeDelete: false },
+    { name: "decision", type: "relation", maxSelect: 1, collectionId: rel("autopilot_decisions"), required: false, cascadeDelete: false },
+    { name: "action_type", type: "select", values: AP_ACTIONS, maxSelect: 1, required: true },
+    { name: "target_type", type: "text", max: 60 },
+    { name: "target_id", type: "text", max: 60 },
+    { name: "status", type: "select", values: AP_ACTION_STATUS, maxSelect: 1, required: true },
+    { name: "requires_approval", type: "bool" },
+    { name: "approved_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "approved_at", type: "date", required: false },
+    { name: "acting_user", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "article", type: "text", max: 15 },
+    { name: "job_type", type: "text", max: 60 },
+    { name: "job_id", type: "text", max: 60 },
+    { name: "idempotency_key", type: "text", max: 300, required: true },
+    { name: "attempt", type: "number", min: 0, onlyInt: true },
+    { name: "max_attempts", type: "number", min: 1, onlyInt: true },
+    { name: "policy_snapshot", type: "json" },
+    { name: "started_at", type: "date", required: false },
+    { name: "completed_at", type: "date", required: false },
+    { name: "result", type: "json" },
+    { name: "error_class", type: "select", values: AP_ERROR_CLASS, maxSelect: 1 },
+    { name: "error_code", type: "text", max: 80 },
+    { name: "error_message", type: "text", max: 1000 },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "autopilot_actions",
+    indexes: [
+      "CREATE UNIQUE INDEX idx_autopilot_actions_idem ON autopilot_actions (idempotency_key) WHERE status NOT IN ('failed', 'cancelled', 'skipped')",
+      "CREATE INDEX idx_autopilot_actions_run ON autopilot_actions (run, created_at)",
+      "CREATE INDEX idx_autopilot_actions_website ON autopilot_actions (website, action_type, created_at)",
+      "CREATE INDEX idx_autopilot_actions_target ON autopilot_actions (target_type, target_id)",
+    ],
+  });
+
+  // Event-driven continuation queue: record hooks enqueue, the worker consumes.
+  await ensureCollection("autopilot_triggers", [
+    ...tenantFields(),
+    { name: "trigger", type: "select", values: AP_TRIGGERS, maxSelect: 1, required: true },
+    { name: "entity_type", type: "text", max: 60 },
+    { name: "entity_id", type: "text", max: 60 },
+    { name: "payload", type: "json" },
+    { name: "dedup_key", type: "text", max: 300, required: true },
+    { name: "status", type: "select", values: ["pending", "processed", "ignored", "merged"], maxSelect: 1, required: true },
+    { name: "run", type: "text", max: 15 },
+    { name: "processed_at", type: "date", required: false },
+    { name: "note", type: "text", max: 500 },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "autopilot_triggers",
+    indexes: ["CREATE UNIQUE INDEX idx_autopilot_triggers_dedup ON autopilot_triggers (dedup_key)", "CREATE INDEX idx_autopilot_triggers_status ON autopilot_triggers (status, created_at)"],
+  });
+
+  // Human-readable run timeline (explainability).
+  await ensureCollection("autopilot_run_events", [
+    ...tenantFields(),
+    { name: "run", type: "relation", maxSelect: 1, collectionId: rel("autopilot_runs"), required: true, cascadeDelete: false },
+    { name: "action", type: "text", max: 15 },
+    { name: "kind", type: "text", max: 60, required: true },
+    { name: "message", type: "text", max: 1000 },
+    { name: "details", type: "json" },
+    { name: "at", type: "date", required: true },
+    ...autodates(),
+  ], ADMIN_READ_RULES, { bareName: "autopilot_run_events", indexes: ["CREATE INDEX idx_autopilot_run_events_run ON autopilot_run_events (run, at)"] });
+
+  // Human tasks ("Needs Your Attention").
+  await ensureCollection("autopilot_tasks", [
+    ...tenantFields(),
+    { name: "run", type: "text", max: 15 },
+    { name: "action", type: "text", max: 15 },
+    { name: "kind", type: "select", values: ["article_approval", "missing_facts", "slug_conflict", "high_risk_review", "integration_reconnect", "publishing_integration", "autopilot_paused", "budget_limit", "technical_issue", "human_review", "circuit_open"], maxSelect: 1, required: true },
+    { name: "title", type: "text", max: 300, required: true },
+    { name: "body", type: "text", max: 2000 },
+    { name: "link", type: "text", max: 500 },
+    { name: "evidence", type: "json" },
+    { name: "status", type: "select", values: ["open", "done", "dismissed"], maxSelect: 1, required: true },
+    { name: "dedup_key", type: "text", max: 300, required: true },
+    { name: "remind_at", type: "date", required: false },
+    { name: "reminders_sent", type: "number", min: 0, onlyInt: true },
+    { name: "resolved_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "resolved_at", type: "date", required: false },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "autopilot_tasks",
+    indexes: ["CREATE UNIQUE INDEX idx_autopilot_tasks_dedup ON autopilot_tasks (website, dedup_key)", "CREATE INDEX idx_autopilot_tasks_status ON autopilot_tasks (organization, status)"],
+  });
+
+  // Circuit breaker per website + action type.
+  await ensureCollection("autopilot_circuits", [
+    ...tenantFields(),
+    { name: "action_type", type: "select", values: AP_ACTIONS, maxSelect: 1, required: true },
+    { name: "state", type: "select", values: ["closed", "open"], maxSelect: 1, required: true },
+    { name: "consecutive_failures", type: "number", min: 0, onlyInt: true },
+    { name: "last_error_class", type: "text", max: 40 },
+    { name: "last_error_code", type: "text", max: 80 },
+    { name: "opened_at", type: "date", required: false },
+    { name: "closed_at", type: "date", required: false },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, { bareName: "autopilot_circuits", indexes: ["CREATE UNIQUE INDEX idx_autopilot_circuits_key ON autopilot_circuits (website, action_type)"] });
+
+  // Feedback history: action -> publication version -> observation windows.
+  // Observations are REAL Search Console aggregates only (or no_data); they
+  // record what happened after a change, never a causal claim.
+  await ensureCollection("autopilot_outcomes", [
+    ...tenantFields(),
+    { name: "action", type: "relation", maxSelect: 1, collectionId: rel("autopilot_actions"), required: true, cascadeDelete: false },
+    { name: "article", type: "relation", maxSelect: 1, collectionId: rel("articles"), required: false, cascadeDelete: false },
+    { name: "publication", type: "relation", maxSelect: 1, collectionId: rel("article_publications"), required: false, cascadeDelete: false },
+    { name: "article_version", type: "number", min: 0, onlyInt: true },
+    { name: "public_url", type: "text", max: 1000 },
+    { name: "change_type", type: "select", values: ["publish", "update"], maxSelect: 1, required: true },
+    { name: "changed_at", type: "date", required: true },
+    { name: "observations", type: "json" },
+    { name: "status", type: "select", values: ["waiting_for_data", "observing", "observed"], maxSelect: 1, required: true },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, { bareName: "autopilot_outcomes", indexes: ["CREATE UNIQUE INDEX idx_autopilot_outcomes_action ON autopilot_outcomes (action)"] });
+
+  // Worker liveness (service health board). Written by workers (superuser).
+  await ensureCollection("service_heartbeats", [
+    { name: "service", type: "text", max: 60, required: true },
+    { name: "version", type: "text", max: 60 },
+    { name: "instance", type: "text", max: 100 },
+    { name: "last_seen_at", type: "date", required: true },
+    { name: "details", type: "json" },
+    ...autodates(),
+  ], { listRule: '@request.auth.id != ""', viewRule: '@request.auth.id != ""', createRule: null, updateRule: null, deleteRule: null }, {
+    bareName: "service_heartbeats",
+    indexes: ["CREATE UNIQUE INDEX idx_service_heartbeats_service ON service_heartbeats (service)"],
+  });
+
+  // Safe default Autopilot policy (OFF, disabled) for every existing website.
+  // Idempotent: websites that already have a policy are untouched, so this
+  // NEVER changes an admin's choice and never enables anything.
+  {
+    const D = {
+      enabled: false, mode: "OFF", paused: false, schedule: "weekly",
+      allowed_actions: ["CRAWL", "STRATEGY_REFRESH", "GENERATE_CONTENT", "RECHECK_CONTENT", "REQUEST_REVISION", "PUBLISH", "VERIFY_PUBLICATION", "UPDATE_PUBLICATION", "NOTIFY_HUMAN", "WAIT"],
+      allowed_environments: ["staging"], max_actions_per_day: 10, max_content_jobs_per_day: 1, max_content_jobs_per_week: 3, max_publications_per_week: 3,
+      max_revision_jobs_per_article: 1, max_strategy_refresh_per_week: 1, max_crawls_per_week: 1, max_ai_budget_daily: 5, max_ai_budget_monthly: 50,
+      max_ai_calls_daily: 60, max_ai_tokens_daily: 2000000, require_human_publish_approval: true, publish_after_human_approval: false,
+      pause_on_high_risk: true, pause_on_fact_failure: true, pause_on_integration_error: true, cooldown_hours: 24, optimization_cooldown_days: 28,
+      crawl_max_age_days: 14, strategy_max_age_days: 30, approval_reminder_days: 3, timezone: "America/Ciudad_Juarez", version: 1,
+    };
+    let page = 1, created = 0;
+    for (;;) {
+      const r = await request(`/api/collections/websites/records?perPage=200&page=${page}&fields=id,organization,client`);
+      if (!r.ok) throw new Error(`list websites failed (${r.status})`);
+      const j = await r.json();
+      for (const w of j.items) {
+        const q = await request(`/api/collections/autopilot_policies/records?perPage=1&filter=${encodeURIComponent(`website = "${w.id}"`)}`);
+        if ((await q.json()).items.length) continue;
+        const ts = new Date().toISOString();
+        const c = await request("/api/collections/autopilot_policies/records", { method: "POST", body: JSON.stringify({ ...D, organization: w.organization, client: w.client, website: w.id, created_at: ts, updated_at: ts }) });
+        if (!c.ok && c.status !== 400) throw new Error(`default policy failed (${c.status}): ${await c.text()}`);
+        if (c.ok) created++;
+      }
+      if (page >= j.totalPages) break;
+      page++;
+    }
+    console.log(`✓ autopilot default policies (OFF) created: ${created}`);
+  }
+
   // --- users auth collection: add fields + tighten rules ---
   const usersCol = await getCollection(USERS_COLL);
   usersCol.fields = [...usersCol.fields.filter((f) =>
@@ -1329,7 +1664,7 @@ async function main() {
   console.log(`   strategy_jobs:   ${REF.strategy_jobs}`);
   console.log(`   strategy_versions: ${REF.strategy_versions}`);
   console.log(`   ai_usage:        ${REF.ai_usage}`);
-  for (const name of ["articles", "article_versions", "content_jobs", "research_sources", "article_research", "article_claims", "article_internal_links", "article_qa_reports", "integrations", "article_publications", "publish_jobs", "publication_events", "published_content", "content_taxonomies", "gsc_connections", "gsc_properties", "gsc_oauth_states", "gsc_sync_jobs", "gsc_site_daily", "gsc_page_daily", "gsc_query_daily", "gsc_query_page_daily", "gsc_query_labels", "analytics_opportunities", "gsc_data_quality_flags", "notifications"]) console.log(`   ${name}: ${REF[name]}`);
+  for (const name of ["articles", "article_versions", "content_jobs", "research_sources", "article_research", "article_claims", "article_internal_links", "article_qa_reports", "integrations", "article_publications", "publish_jobs", "publication_events", "published_content", "content_taxonomies", "gsc_connections", "gsc_properties", "gsc_oauth_states", "gsc_sync_jobs", "gsc_site_daily", "gsc_page_daily", "gsc_query_daily", "gsc_query_page_daily", "gsc_query_labels", "analytics_opportunities", "gsc_data_quality_flags", "notifications", "autopilot_policies", "autopilot_controls", "autopilot_runs", "autopilot_signals", "autopilot_decisions", "autopilot_actions", "autopilot_triggers", "autopilot_run_events", "autopilot_tasks", "autopilot_circuits", "autopilot_outcomes", "service_heartbeats"]) console.log(`   ${name}: ${REF[name]}`);
   console.log(`   PB_URL: ${PB_URL}`);
 }
 

@@ -1,0 +1,17 @@
+{
+  "name": "bunker-seo-autopilot-worker",
+  "version": "0.7.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 7 Autopilot orchestration worker: signals, deterministic decisions, delegated actions.",
+  "scripts": {
+    "start": "node worker.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "pocketbase": "^0.28.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

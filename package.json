@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "node --test scripts/test.mjs && node --test scripts/test-phase2.mjs && node --test scripts/test-phase3.mjs && npm run test:phase4 && npm run test:auth && npm run test:strategy-worker && npm run test:content-worker && npm run test:phase5 && npm run test:publisher && npm run test:phase6 && npm run test:analytics && node --test scripts/test-local-only.mjs",
+    "test": "node --test scripts/test.mjs && node --test scripts/test-phase2.mjs && node --test scripts/test-phase3.mjs && npm run test:phase4 && npm run test:auth && npm run test:strategy-worker && npm run test:content-worker && npm run test:phase5 && npm run test:publisher && npm run test:phase6 && npm run test:analytics && npm run test:phase7 && npm run test:autopilot && node --test scripts/test-local-only.mjs",
     "test:phase5": "node --test --test-concurrency=1 scripts/test-phase5.mjs",
     "test:publisher": "cd publisher-worker && node --test \"test/*.test.js\"",
     "test:crawler": "cd crawler && node --test \"test/*.test.js\"",
@@ -21,7 +21,9 @@
     "test:seed": "node scripts/seed-test.mjs",
     "pb:setup": "node scripts/setup-pocketbase.mjs",
     "test:phase6": "node --test --test-concurrency=1 scripts/test-phase6.mjs",
-    "test:analytics": "cd analytics-worker && node --test \"test/*.test.js\""
+    "test:analytics": "cd analytics-worker && node --test \"test/*.test.js\"",
+    "test:phase7": "node --experimental-strip-types --test --test-concurrency=1 scripts/test-phase7.mjs",
+    "test:autopilot": "cd autopilot-worker && node --test \"test/*.test.js\""
   },
   "dependencies": {
     "lucide-react": "^1.47.0",

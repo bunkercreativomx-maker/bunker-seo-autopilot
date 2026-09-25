@@ -11,6 +11,7 @@ const TABS = [
   { href: "/content", label: "Content" },
   { href: "/pages", label: "Pages" },
   { href: "/analytics", label: "Analytics" },
+  { href: "/autopilot", label: "Autopilot" },
   { href: "/publishing", label: "Integrations · Publishing" },
   { href: "/search-console", label: "Integrations · Search Console" },
 ] as const;

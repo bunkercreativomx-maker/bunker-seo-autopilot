@@ -47,3 +47,4 @@ staging-site/node_modules/
 staging-site/.next/
 staging-site/.data/
 analytics-worker/node_modules/
+autopilot-worker/node_modules/

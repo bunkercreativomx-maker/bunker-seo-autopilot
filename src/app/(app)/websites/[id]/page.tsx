@@ -7,6 +7,8 @@ import { AnalyzeButton } from "@/components/analyze-button";
 import { CrawlProgress } from "@/components/crawl-progress";
 import { formatDate } from "@/lib/format";
 import { archiveWebsiteAction } from "@/app/actions/websites";
+import { getPolicy, listActions, listRuns } from "@/lib/pocketbase/autopilot";
+import { ModeBadge } from "@/components/autopilot/autopilot-view";
 
 export const dynamic = "force-dynamic";
 
@@ -25,10 +27,13 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
   const website = await getWebsite(pb, id);
   if (!website) return null; // layout handles notFound
 
-  const [latestJob, snapshot, counts] = await Promise.all([
+  const [latestJob, snapshot, counts, ap, apRuns, apWaiting] = await Promise.all([
     getLatestJob(pb, website.id),
     getLatestSnapshot(pb, website.id),
     countOpenIssuesBySeverity(pb, website.id),
+    getPolicy(pb, website.id),
+    listRuns(pb, `website = "${website.id}" && dry_run = false`, 1),
+    listActions(pb, `website = "${website.id}" && status = "waiting_for_approval"`, 20),
   ]);
 
   const client = website.expand?.client;
@@ -117,6 +122,24 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
         </CardBody>
       </Card>
 
+      {/* Autopilot (Phase 7) */}
+      <Card className="lg:col-span-3">
+        <CardHeader
+          title="Autopilot"
+          subtitle="Coordinates existing modules. Never approves content or publishes without a recorded human approval."
+          action={ap ? <ModeBadge mode={ap.policy.mode} enabled={ap.policy.enabled} paused={ap.policy.paused} orgPaused={ap.organization_paused} /> : <Badge>OFF</Badge>}
+        />
+        <CardBody>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat label="Last run" value={apRuns[0] ? `${formatDate(apRuns[0].started_at || apRuns[0].created_at)} · ${apRuns[0].status}` : "Never"} />
+            <Stat label="Next run" value={ap?.policy.enabled && !ap.policy.paused && ap.policy.next_run_at ? formatDate(ap.policy.next_run_at) : ap?.policy.schedule === "manual_only" ? "Manual only" : "—"} />
+            <Stat label="Waiting approval" value={apWaiting.length} />
+            <Stat label="Actions (last run)" value={apRuns[0]?.action_count ?? 0} />
+          </div>
+          <Link href={`/websites/${website.id}/autopilot`} className="mt-3 inline-block text-sm font-medium text-sky-600 hover:text-sky-500">Open Autopilot →</Link>
+        </CardBody>
+      </Card>
+
       {/* Full info */}
       <Card className="lg:col-span-3">
         <CardHeader title="Website Information" />
@@ -148,10 +171,10 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-      <div className="text-xl font-semibold text-slate-900">{value}</div>
+      <div className={typeof value === "number" ? "text-xl font-semibold text-slate-900" : "text-sm font-semibold text-slate-900"}>{value}</div>
       <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
     </div>
   );
