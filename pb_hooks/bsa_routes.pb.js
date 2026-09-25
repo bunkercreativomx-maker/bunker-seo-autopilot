@@ -148,3 +148,167 @@ routerAdd("POST", "/api/bsa/publishing/versions", (e) => {
     return { versions: pub.publishedVersions(a.id) };
   });
 }, $apis.requireAuth("users"));
+
+// ---------------------------------------------------------------- Phase 6: Search Console analytics
+// Read-only Google integration. User endpoints run as the signed-in user
+// (tenant + role checks inside bsa_gsc.js). /api/bsa/internal/gsc/* is for the
+// bunker-seo-analytics worker only (PocketBase superuser).
+routerAdd("POST", "/api/bsa/gsc/oauth/start", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.startOAuth(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/gsc/oauth/complete", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.completeOAuth(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/gsc/properties/refresh", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.refreshProperties(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/gsc/properties", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.listProperties(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/gsc/property/select", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.selectProperty(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/gsc/disconnect", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.disconnect(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/gsc/connection", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.connectionInfo(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/gsc/sync", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.requestSync(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/gsc/sync/cancel", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.cancelSync(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/analytics/summary", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.summary(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/analytics/queries", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.queries(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/analytics/pages", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.pages(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/analytics/query", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.queryDetail(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/analytics/article", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.articlePerformance(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/analytics/organization", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.orgOverview(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/analytics/client", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.clientOverview(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/analytics/opportunity/decide", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.decideOpportunity(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/analytics/brand", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.setBrandOverride(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/analytics/quality-flag", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.addQualityFlag(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/analytics/settings", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.saveSettings(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/notifications/read", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  return lib.handle(e, (actor, body) => gsc.markNotification(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/internal/gsc/upsert", (e) => {
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  try {
+    return e.json(200, { result: gsc.internalUpsert(e.requestInfo().body || {}) });
+  } catch (err) {
+    if (err && err.bsa) return e.json(err.bsa.status, { code: err.bsa.code, message: err.bsa.message });
+    $app.logger().error("bsa internal gsc failed", "path", e.request.url.path, "error", String(err));
+    return e.json(500, { code: "INTERNAL", message: "internal error" });
+  }
+}, $apis.requireSuperuserAuth());
+
+routerAdd("POST", "/api/bsa/internal/gsc/labels", (e) => {
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  try {
+    return e.json(200, { result: gsc.internalLabels(e.requestInfo().body || {}) });
+  } catch (err) {
+    if (err && err.bsa) return e.json(err.bsa.status, { code: err.bsa.code, message: err.bsa.message });
+    $app.logger().error("bsa internal gsc failed", "path", e.request.url.path, "error", String(err));
+    return e.json(500, { code: "INTERNAL", message: "internal error" });
+  }
+}, $apis.requireSuperuserAuth());
+
+routerAdd("POST", "/api/bsa/internal/gsc/aggregate", (e) => {
+  const gsc = require(`${__hooks}/bsa_gsc.js`);
+  try {
+    return e.json(200, { result: gsc.internalAggregate(e.requestInfo().body || {}) });
+  } catch (err) {
+    if (err && err.bsa) return e.json(err.bsa.status, { code: err.bsa.code, message: err.bsa.message });
+    $app.logger().error("bsa internal gsc failed", "path", e.request.url.path, "error", String(err));
+    return e.json(500, { code: "INTERNAL", message: "internal error" });
+  }
+}, $apis.requireSuperuserAuth());
+

@@ -7,6 +7,8 @@ import { listActivity } from "@/lib/pocketbase/activity-read";
 import { Card, CardHeader, CardBody, Badge, statusTone, EmptyState, PageHeader, Button } from "@/components/ui";
 import { formatDate } from "@/lib/format";
 import { archiveClientAction } from "@/app/actions/clients";
+import { getClientOverview } from "@/lib/pocketbase/analytics";
+import { fmtInt, fmtPct, fmtPos } from "@/lib/analytics/format";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +23,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     listActivity(pb, 10),
   ]);
 
+  const gsc = await getClientOverview(pb, id, "28d");
   const clientActivity = activity.filter((a) => a.client === id);
 
   const info: Array<[string, string]> = [
@@ -122,6 +125,31 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           </CardBody>
         </Card>
       </div>
+
+      {/* Search Console analytics (Phase 6) */}
+      {gsc && gsc.sites.length > 0 && (
+        <div className="mt-6">
+          <Card>
+            <CardHeader title="Search Console — last 28 finalized days" subtitle="Source: Google Search Console. Totals are summed; CTR = total clicks / total impressions; position is shown per website." />
+            <CardBody className="space-y-3 text-sm">
+              <p>
+                <b>{fmtInt(gsc.aggregate.clicks)}</b> clicks · <b>{fmtInt(gsc.aggregate.impressions)}</b> impressions · CTR <b>{fmtPct(gsc.aggregate.ctr, 2)}</b>
+                {gsc.aggregate.weightedPosition !== null && <span className="text-slate-500"> · impression-weighted avg. position {fmtPos(gsc.aggregate.weightedPosition)}</span>}
+              </p>
+              <ul className="divide-y divide-slate-100">
+                {gsc.sites.map((s) => (
+                  <li key={s.website.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                    <Link className="text-sky-700" href={`/websites/${s.website.id}/analytics`}>{s.website.name}</Link>
+                    {!s.connected ? <span className="text-xs text-slate-400">Search Console not connected</span>
+                      : !s.totals ? <span className="text-xs text-slate-400">No data yet</span>
+                      : <span className="text-xs text-slate-600">{fmtInt(s.totals.clicks)} clicks · {fmtInt(s.totals.impressions)} impressions · CTR {fmtPct(s.totals.ctr, 2)} · avg. position {fmtPos(s.totals.position)}</span>}
+                  </li>
+                ))}
+              </ul>
+            </CardBody>
+          </Card>
+        </div>
+      )}
 
       {/* Activity */}
       <div className="mt-6">

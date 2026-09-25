@@ -868,6 +868,8 @@ async function main() {
     { name: "publishing_configuration", type: "json" },
     { name: "last_publication_at", type: "date", required: false },
   ];
+  // Phase 6: analytics thresholds are hook-written only (same lock as P5 fields).
+  P5_WEBSITE_FIELDS.push({ name: "analytics_settings", type: "json" });
   const lockP5 = P5_WEBSITE_FIELDS.map((f) => `@request.body.${f.name}:isset = false`).join(" && ");
   await ensureCollection("websites", P5_WEBSITE_FIELDS, {
     listRule: 'organization.id = @request.auth.organization.id',
@@ -1033,6 +1035,258 @@ async function main() {
     indexes: ["CREATE UNIQUE INDEX idx_taxonomies_website_kind_slug ON content_taxonomies (website, kind, slug)"],
   });
 
+  // ================================================================ Phase 6
+  // Search Console analytics. Every collection is written ONLY by pb_hooks or
+  // the bunker-seo-analytics worker (superuser); users read their own org.
+  // OAuth material (refresh token, state nonces) lives in hidden fields that
+  // the REST API never returns.
+  const siteOrg = () => [
+    { name: "organization", type: "relation", maxSelect: 1, collectionId: rel("organizations"), required: true, cascadeDelete: false },
+    { name: "website", type: "relation", maxSelect: 1, collectionId: rel("websites"), required: true, cascadeDelete: true },
+  ];
+
+  await ensureCollection("gsc_connections", [
+    { name: "organization", type: "relation", maxSelect: 1, collectionId: rel("organizations"), required: true, cascadeDelete: false },
+    { name: "connected_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "google_account_email", type: "text", max: 320 },
+    { name: "google_sub", type: "text", max: 100, hidden: true },
+    { name: "encrypted_refresh_token", type: "text", max: 4000, hidden: true },
+    { name: "scopes", type: "json" },
+    { name: "status", type: "select", values: ["connected", "expired", "revoked", "error", "reauth_required", "disconnected"], maxSelect: 1, required: true },
+    { name: "last_refresh_at", type: "date", required: false },
+    { name: "last_error", type: "text", max: 500 },
+    { name: "disconnected_at", type: "date", required: false },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "gsc_connections",
+    indexes: ["CREATE UNIQUE INDEX idx_gsc_connections_org_sub ON gsc_connections (organization, google_sub) WHERE google_sub != ''"],
+  });
+
+  await ensureCollection("gsc_properties", [
+    { name: "organization", type: "relation", maxSelect: 1, collectionId: rel("organizations"), required: true, cascadeDelete: false },
+    { name: "connection", type: "relation", maxSelect: 1, collectionId: rel("gsc_connections"), required: true, cascadeDelete: true },
+    { name: "website", type: "relation", maxSelect: 1, collectionId: rel("websites"), required: false, cascadeDelete: false },
+    { name: "site_url", type: "text", max: 500, required: true },
+    { name: "property_type", type: "select", values: ["domain", "url_prefix"], maxSelect: 1, required: true },
+    { name: "permission_level", type: "text", max: 50 },
+    { name: "status", type: "select", values: ["available", "active", "access_lost", "disconnected"], maxSelect: 1, required: true },
+    { name: "selected", type: "bool" },
+    { name: "match_status", type: "select", values: ["matched", "possible_match", "mismatch"], maxSelect: 1 },
+    { name: "selected_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "selected_at", type: "date", required: false },
+    { name: "last_verified_at", type: "date", required: false },
+    // Search Console dates are PT calendar days kept verbatim (YYYY-MM-DD).
+    { name: "latest_final_date", type: "text", max: 10 },
+    { name: "first_data_date", type: "text", max: 10 },
+    { name: "last_synced_date", type: "text", max: 10 },
+    { name: "source_timezone", type: "text", max: 60 },
+    { name: "last_sync_at", type: "date", required: false },
+    { name: "last_sync_status", type: "text", max: 40 },
+    { name: "consecutive_failures", type: "number", min: 0, onlyInt: true },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "gsc_properties",
+    indexes: [
+      "CREATE UNIQUE INDEX idx_gsc_properties_conn_site ON gsc_properties (connection, site_url)",
+      "CREATE UNIQUE INDEX idx_gsc_properties_selected_website ON gsc_properties (website) WHERE selected = TRUE AND website != ''",
+      "CREATE INDEX idx_gsc_properties_org ON gsc_properties (organization, status)",
+    ],
+  });
+
+  await ensureCollection("gsc_oauth_states", [
+    { name: "organization", type: "relation", maxSelect: 1, collectionId: rel("organizations"), required: true, cascadeDelete: true },
+    { name: "user", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: true, cascadeDelete: true },
+    { name: "website", type: "relation", maxSelect: 1, collectionId: rel("websites"), required: true, cascadeDelete: true },
+    { name: "connection", type: "text", max: 15 },
+    { name: "state_hash", type: "text", max: 64, required: true, hidden: true },
+    { name: "expires_at", type: "date", required: true },
+    { name: "used_at", type: "date", required: false },
+    ...timestamps(),
+  ], { listRule: null, viewRule: null, createRule: null, updateRule: null, deleteRule: null }, {
+    bareName: "gsc_oauth_states",
+    indexes: ["CREATE UNIQUE INDEX idx_gsc_oauth_state_hash ON gsc_oauth_states (state_hash)"],
+  });
+
+  await ensureCollection("gsc_sync_jobs", [
+    ...siteOrg(),
+    { name: "property", type: "relation", maxSelect: 1, collectionId: rel("gsc_properties"), required: true, cascadeDelete: false },
+    { name: "status", type: "select", values: ["queued", "running", "completed", "completed_with_warnings", "failed", "cancelled"], maxSelect: 1, required: true },
+    { name: "sync_type", type: "select", values: ["initial", "manual", "daily", "backfill"], maxSelect: 1, required: true },
+    { name: "range_label", type: "text", max: 20 },
+    { name: "search_type", type: "text", max: 20 },
+    { name: "data_state", type: "text", max: 10 },
+    { name: "start_date", type: "text", max: 10 },
+    { name: "end_date", type: "text", max: 10 },
+    { name: "step", type: "text", max: 200 },
+    { name: "progress", type: "number", min: 0, max: 100 },
+    { name: "rows_requested", type: "number", min: 0, onlyInt: true },
+    { name: "rows_received", type: "number", min: 0, onlyInt: true },
+    { name: "rows_stored", type: "number", min: 0, onlyInt: true },
+    { name: "api_requests", type: "number", min: 0, onlyInt: true },
+    { name: "pagination_completed", type: "bool" },
+    { name: "datasets", type: "json" },
+    { name: "warnings", type: "json" },
+    { name: "attempt", type: "number", min: 0, onlyInt: true },
+    { name: "dedupe_key", type: "text", max: 200 },
+    { name: "started_at", type: "date", required: false },
+    { name: "completed_at", type: "date", required: false },
+    { name: "error_code", type: "text", max: 80 },
+    { name: "error_message", type: "text", max: 1000 },
+    { name: "triggered_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "gsc_sync_jobs",
+    indexes: [
+      "CREATE INDEX idx_gsc_jobs_status ON gsc_sync_jobs (status, created_at)",
+      "CREATE INDEX idx_gsc_jobs_website ON gsc_sync_jobs (website, created_at)",
+      "CREATE UNIQUE INDEX idx_gsc_jobs_active_property ON gsc_sync_jobs (property) WHERE status IN ('queued', 'running')",
+      "CREATE UNIQUE INDEX idx_gsc_jobs_dedupe ON gsc_sync_jobs (dedupe_key) WHERE dedupe_key != ''",
+    ],
+  });
+
+  // Metric rows: only values returned by Google (clicks, impressions, ctr,
+  // position). `date` = Search Console source_date (PT day), stored verbatim.
+  const metricFields = () => [
+    { name: "clicks", type: "number", min: 0 },
+    { name: "impressions", type: "number", min: 0 },
+    { name: "ctr", type: "number", min: 0 },
+    { name: "position", type: "number", min: 0 },
+    { name: "search_type", type: "text", max: 20, required: true },
+    { name: "synced_at", type: "date", required: false },
+  ];
+  const metricBase = () => [
+    ...siteOrg(),
+    { name: "property", type: "relation", maxSelect: 1, collectionId: rel("gsc_properties"), required: true, cascadeDelete: false },
+    { name: "date", type: "text", max: 10, required: true },
+  ];
+  await ensureCollection("gsc_site_daily", [
+    ...metricBase(), ...metricFields(),
+    { name: "data_state", type: "text", max: 10 },
+  ], ADMIN_READ_RULES, {
+    bareName: "gsc_site_daily",
+    indexes: ["CREATE UNIQUE INDEX idx_gsc_site_unique ON gsc_site_daily (website, property, date, search_type)"],
+  });
+  await ensureCollection("gsc_page_daily", [
+    ...metricBase(),
+    { name: "page", type: "text", max: 2000, required: true },
+    ...metricFields(),
+  ], ADMIN_READ_RULES, {
+    bareName: "gsc_page_daily",
+    indexes: [
+      "CREATE UNIQUE INDEX idx_gsc_page_unique ON gsc_page_daily (website, property, date, search_type, page)",
+      "CREATE INDEX idx_gsc_page_website_page_date ON gsc_page_daily (website, page, date)",
+    ],
+  });
+  await ensureCollection("gsc_query_daily", [
+    ...metricBase(),
+    { name: "query", type: "text", max: 1000, required: true },
+    { name: "normalized_query", type: "text", max: 1000, required: true },
+    ...metricFields(),
+  ], ADMIN_READ_RULES, {
+    bareName: "gsc_query_daily",
+    indexes: [
+      "CREATE UNIQUE INDEX idx_gsc_query_unique ON gsc_query_daily (website, property, date, search_type, query)",
+      "CREATE INDEX idx_gsc_query_website_nq_date ON gsc_query_daily (website, normalized_query, date)",
+    ],
+  });
+  await ensureCollection("gsc_query_page_daily", [
+    ...metricBase(),
+    { name: "query", type: "text", max: 1000, required: true },
+    { name: "normalized_query", type: "text", max: 1000, required: true },
+    { name: "page", type: "text", max: 2000, required: true },
+    ...metricFields(),
+  ], ADMIN_READ_RULES, {
+    bareName: "gsc_query_page_daily",
+    indexes: [
+      "CREATE UNIQUE INDEX idx_gsc_qp_unique ON gsc_query_page_daily (website, property, date, search_type, query, page)",
+      "CREATE INDEX idx_gsc_qp_website_nq_date ON gsc_query_page_daily (website, normalized_query, date)",
+      "CREATE INDEX idx_gsc_qp_website_page_date ON gsc_query_page_daily (website, page, date)",
+    ],
+  });
+
+  // Deterministic query labels (Phase 3 classifier + Phase 3 keyword mapping).
+  await ensureCollection("gsc_query_labels", [
+    ...siteOrg(),
+    { name: "normalized_query", type: "text", max: 1000, required: true },
+    { name: "query", type: "text", max: 1000 },
+    { name: "mapping", type: "select", values: ["known_keyword", "related_variant", "new_query", "unmapped"], maxSelect: 1, required: true },
+    { name: "keyword", type: "relation", maxSelect: 1, collectionId: rel("keywords"), required: false, cascadeDelete: false },
+    { name: "mapped_page", type: "text", max: 2000 },
+    { name: "intent", type: "text", max: 20 },
+    { name: "brand", type: "select", values: ["branded", "non_branded", "unknown"], maxSelect: 1 },
+    { name: "brand_override", type: "select", values: ["branded", "non_branded"], maxSelect: 1 },
+    { name: "source", type: "text", max: 40 },
+    { name: "labeled_at", type: "date", required: false },
+  ], ADMIN_READ_RULES, {
+    bareName: "gsc_query_labels",
+    indexes: ["CREATE UNIQUE INDEX idx_gsc_labels_unique ON gsc_query_labels (website, normalized_query)"],
+  });
+
+  await ensureCollection("analytics_opportunities", [
+    ...tenantFields(),
+    { name: "type", type: "select", values: ["new_query", "high_impressions_low_ctr", "striking_distance", "content_decay", "growing_query", "growing_page", "position_decline", "impression_growth", "page_query_mismatch", "optimization_candidate", "potential_cannibalization"], maxSelect: 1, required: true },
+    { name: "dedupe_key", type: "text", max: 64, required: true },
+    { name: "query", type: "text", max: 1000 },
+    { name: "page", type: "text", max: 2000 },
+    { name: "current_period", type: "json" },
+    { name: "previous_period", type: "json" },
+    { name: "evidence", type: "json", required: true },
+    { name: "reason", type: "text", max: 2000 },
+    { name: "priority", type: "select", values: ["high", "medium", "low"], maxSelect: 1, required: true },
+    { name: "recommended_action", type: "text", max: 1000 },
+    { name: "status", type: "select", values: ["new", "reviewed", "accepted", "ignored", "resolved"], maxSelect: 1, required: true },
+    { name: "source", type: "text", max: 40, required: true },
+    { name: "first_detected_at", type: "date", required: false },
+    { name: "last_detected_at", type: "date", required: false },
+    { name: "resolved_at", type: "date", required: false },
+    { name: "detection_count", type: "number", min: 0, onlyInt: true },
+    { name: "decided_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    { name: "decided_at", type: "date", required: false },
+    { name: "decision_note", type: "text", max: 1000 },
+    { name: "content_opportunity", type: "relation", maxSelect: 1, collectionId: rel("content_opportunities"), required: false, cascadeDelete: false },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "analytics_opportunities",
+    indexes: [
+      "CREATE UNIQUE INDEX idx_analytics_opp_dedupe ON analytics_opportunities (website, dedupe_key)",
+      "CREATE INDEX idx_analytics_opp_website_type_status ON analytics_opportunities (website, type, status)",
+    ],
+  });
+
+  await ensureCollection("gsc_data_quality_flags", [
+    ...siteOrg(),
+    { name: "start_date", type: "text", max: 10, required: true },
+    { name: "end_date", type: "text", max: 10, required: true },
+    { name: "reason", type: "text", max: 500, required: true },
+    { name: "exclude_from_opportunities", type: "bool" },
+    { name: "active", type: "bool" },
+    { name: "created_by", type: "relation", maxSelect: 1, collectionId: USERS_COLL, required: false, cascadeDelete: false },
+    ...timestamps(),
+  ], ADMIN_READ_RULES, { bareName: "gsc_data_quality_flags" });
+
+  await ensureCollection("notifications", [
+    { name: "organization", type: "relation", maxSelect: 1, collectionId: rel("organizations"), required: true, cascadeDelete: true },
+    { name: "website", type: "relation", maxSelect: 1, collectionId: rel("websites"), required: false, cascadeDelete: true },
+    { name: "kind", type: "text", max: 60, required: true },
+    { name: "severity", type: "select", values: ["info", "warning", "critical"], maxSelect: 1, required: true },
+    { name: "title", type: "text", max: 300, required: true },
+    { name: "body", type: "text", max: 2000 },
+    { name: "link", type: "text", max: 500 },
+    { name: "dedupe_key", type: "text", max: 200, required: true },
+    { name: "occurrences", type: "number", min: 0, onlyInt: true },
+    { name: "read_at", type: "date", required: false },
+    ...timestamps(),
+    ...autodates(),
+  ], ADMIN_READ_RULES, {
+    bareName: "notifications",
+    indexes: ["CREATE UNIQUE INDEX idx_notifications_dedupe ON notifications (organization, dedupe_key)"],
+  });
+
+
   // --- users auth collection: add fields + tighten rules ---
   const usersCol = await getCollection(USERS_COLL);
   usersCol.fields = [...usersCol.fields.filter((f) =>
@@ -1075,7 +1329,7 @@ async function main() {
   console.log(`   strategy_jobs:   ${REF.strategy_jobs}`);
   console.log(`   strategy_versions: ${REF.strategy_versions}`);
   console.log(`   ai_usage:        ${REF.ai_usage}`);
-  for (const name of ["articles", "article_versions", "content_jobs", "research_sources", "article_research", "article_claims", "article_internal_links", "article_qa_reports", "integrations", "article_publications", "publish_jobs", "publication_events", "published_content", "content_taxonomies"]) console.log(`   ${name}: ${REF[name]}`);
+  for (const name of ["articles", "article_versions", "content_jobs", "research_sources", "article_research", "article_claims", "article_internal_links", "article_qa_reports", "integrations", "article_publications", "publish_jobs", "publication_events", "published_content", "content_taxonomies", "gsc_connections", "gsc_properties", "gsc_oauth_states", "gsc_sync_jobs", "gsc_site_daily", "gsc_page_daily", "gsc_query_daily", "gsc_query_page_daily", "gsc_query_labels", "analytics_opportunities", "gsc_data_quality_flags", "notifications"]) console.log(`   ${name}: ${REF[name]}`);
   console.log(`   PB_URL: ${PB_URL}`);
 }
 

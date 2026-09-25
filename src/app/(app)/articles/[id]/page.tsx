@@ -15,6 +15,8 @@ import {
 } from "@/app/actions/content";
 import { ARTICLE_STATUS_LABELS, CONTENT_TYPE_LABELS, JOB_STEP_LABELS } from "@/lib/content/types";
 import { ArticlePublishing } from "@/components/publishing/article-publishing";
+import { ArticleSearchPerformance } from "@/components/analytics/article-performance";
+import { getArticlePerformance } from "@/lib/pocketbase/analytics";
 import { getPublication, listPublicationEvents, listPublishJobs, publishPreview, rollbackCandidates } from "@/lib/pocketbase/publishing";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +58,7 @@ export default async function ArticlePage({ params, searchParams }: { params: Pr
   const publishing = tab === "publishing"
     ? await Promise.all([publishPreview(pb, a.id, a.website), getPublication(pb, a.id), listPublicationEvents(pb, a.id), listPublishJobs(pb, `article = "${a.id}"`, 20), rollbackCandidates(pb, a.id)])
     : null;
+  const searchPerf = tab === "publishing" ? await getArticlePerformance(pb, a.id) : null;
   const blockers = approvalBlockers(a as unknown as Record<string, unknown> & { id: string });
   const hidden = { articleId: a.id, websiteId: a.website };
   const brief = (a.brief ?? {}) as Record<string, unknown>;
@@ -430,6 +433,7 @@ export default async function ArticlePage({ params, searchParams }: { params: Pr
           candidates={publishing[4]}
         />
       )}
+      {tab === "publishing" && <ArticleSearchPerformance perf={searchPerf} />}
 
       {tab === "history" && (
         <div className="space-y-6">

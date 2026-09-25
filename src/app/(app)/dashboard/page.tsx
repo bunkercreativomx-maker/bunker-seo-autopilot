@@ -6,6 +6,9 @@ import { listActivity } from "@/lib/pocketbase/activity-read";
 import { Card, CardHeader, CardBody, Badge, statusTone, EmptyState, PageHeader, Button } from "@/components/ui";
 import { formatDate, formatRelative } from "@/lib/format";
 import { publishingOverview } from "@/lib/pocketbase/publishing";
+import { getOrgOverview, listNotifications } from "@/lib/pocketbase/analytics";
+import { fmtChange, fmtInt, toneClass } from "@/lib/analytics/format";
+import { markNotificationAction } from "@/app/actions/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +20,7 @@ export default async function DashboardPage() {
     listActivity(pb, 8),
   ]);
   const pubs = await publishingOverview(pb);
+  const [gsc, notes] = await Promise.all([getOrgOverview(pb, "28d"), listNotifications(pb, 5)]);
 
   const activeWebsites = websites.filter((w) => w.status === "active").length;
   const recentClients = clients.slice(0, 5);
@@ -80,6 +84,51 @@ export default async function DashboardPage() {
           </Link>
         ))}
       </div>
+
+      {/* Search Console analytics (Phase 6) */}
+      {gsc && (
+        <div className="mt-4">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-6">
+            {([
+              ["Organic Clicks", gsc.websitesConnected ? fmtInt(gsc.clicks.current) : "—", gsc.websitesConnected ? fmtChange(gsc.clicks) : null],
+              ["Organic Impressions", gsc.websitesConnected ? fmtInt(gsc.impressions.current) : "—", gsc.websitesConnected ? fmtChange(gsc.impressions) : null],
+              ["Websites on Search Console", String(gsc.websitesConnected), null],
+              ["SEO Opportunities", String(gsc.opportunities), null],
+              ["Growing Pages", String(gsc.growingPages), null],
+              ["Pages Losing Traffic", String(gsc.pagesLosingTraffic), null],
+            ] as const).map(([label, value, change]) => (
+              <Card key={label}>
+                <CardBody>
+                  <div className="text-xs font-medium text-slate-500">{label}</div>
+                  <div className="mt-1 text-xl font-semibold text-slate-900">{value}</div>
+                  {change && <div className={`text-xs ${toneClass(change.tone)}`}>{change.text}</div>}
+                </CardBody>
+              </Card>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-slate-500">Source: Google Search Console · last 28 finalized days vs previous 28{gsc.dataThrough ? ` · data through ${gsc.dataThrough}` : ""}. Only websites connected to Search Console are counted.</p>
+        </div>
+      )}
+
+      {notes.length > 0 && (
+        <Card className="mt-4">
+          <CardHeader title="Notifications" />
+          <CardBody className="p-0">
+            <ul className="divide-y divide-slate-100">
+              {notes.map((n) => (
+                <li key={n.id} className="flex items-start justify-between gap-3 px-5 py-3 text-sm">
+                  <div>
+                    <p className={n.severity === "critical" ? "font-medium text-rose-700" : n.severity === "warning" ? "font-medium text-amber-700" : "font-medium text-slate-800"}>{n.title}{n.occurrences > 1 ? ` (×${n.occurrences})` : ""}</p>
+                    <p className="text-xs text-slate-500">{n.body}</p>
+                    {n.link && <Link href={n.link} className="text-xs text-sky-600">Open</Link>}
+                  </div>
+                  <form action={markNotificationAction}><input type="hidden" name="notificationId" value={n.id} /><button className="text-xs text-slate-500 hover:text-slate-800">Dismiss</button></form>
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Recent clients */}
