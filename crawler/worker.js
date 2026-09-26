@@ -11,6 +11,7 @@ import { runCrawl } from "./src/crawler.js";
 import { createWorkerClient, authWorker, claimNextJob, resolveJobContext, getExistingPages, getExistingIssues, upsertPage, persistLinks, createSnapshot, updateJobProgress } from "./src/pb.js";
 import { normalizeUrl } from "./src/normalize.js";
 import { pageIssues } from "./src/issues.js";
+import { applyAutoSetup } from "./src/autosetup.js";
 
 const PB_URL = process.env.PB_URL || "http://127.0.0.1:8096";
 const PB_ADMIN_EMAIL = process.env.PB_ADMIN_EMAIL;
@@ -22,6 +23,14 @@ if (!PB_ADMIN_EMAIL || !PB_ADMIN_PASSWORD) {
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL_MS || "3000", 10);
 const MAX_PAGES = parseInt(process.env.MAX_PAGES || "500", 10);
 const CONCURRENCY = parseInt(process.env.CONCURRENCY || "3", 10);
+// Auto-setup (learn the business from its own site). The AI part is optional:
+// without a key only deterministic facts (tel/mailto/language) are captured.
+const AUTO_SETUP_AI = process.env.OPENAI_API_KEY
+  ? { apiKey: process.env.OPENAI_API_KEY, baseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1", model: process.env.AUTO_SETUP_MODEL || "gpt-5-mini" }
+  : null;
+const AUTO_SETUP_RENDER = process.env.FIRECRAWL_API_KEY
+  ? { apiKey: process.env.FIRECRAWL_API_KEY, baseUrl: process.env.FIRECRAWL_BASE_URL || "https://api.firecrawl.dev/v1" }
+  : null;
 
 const client = createWorkerClient({ url: PB_URL });
 
@@ -137,6 +146,15 @@ async function processJob(job) {
     errors_count: result.failed.length,
   });
   console.log(`[job ${jobId}] done: ${result.pages.length} pages, ${result.links.length} links, ${issueCounts.total} issues`);
+
+  // 9) one-step setup: learn the business + language from the site, then queue topics.
+  if (job.configuration && job.configuration.auto_setup === true) {
+    try {
+      await applyAutoSetup(client, ctx, job, result.pages, { ai: AUTO_SETUP_AI, render: AUTO_SETUP_RENDER });
+    } catch (e) {
+      console.error(`[job ${jobId}] auto-setup failed: ${e?.message || e}`);
+    }
+  }
 }
 
 async function persistIssues(client, ctx, jobId, result, allPages, pageIdByUrl) {

@@ -6,7 +6,7 @@ import { Badge, Button } from "@/components/ui";
 import { AnalyzeButton } from "@/components/analyze-button";
 import { CrawlProgress } from "@/components/crawl-progress";
 import { formatDate } from "@/lib/format";
-import { archiveWebsiteAction } from "@/app/actions/websites";
+import { archiveWebsiteAction, relearnWebsiteAction } from "@/app/actions/websites";
 import { getPolicy } from "@/lib/pocketbase/autopilot";
 import { SiteRow } from "@/components/today/today-cards";
 import { StrategyGenerateButton } from "@/components/strategy-generate-button";
@@ -57,6 +57,12 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
 
   const stratVersions = await pb.collection("strategy_versions").getList(1, 1, { filter: `website = "${website.id}"`, requestKey: null }).catch(() => null);
   const hasPlan = (stratVersions?.totalItems ?? 0) > 0;
+  const activeStrategy = await pb.collection("strategy_jobs").getList(1, 1, { filter: `website = "${website.id}" && (status = "queued" || status = "running")`, requestKey: null }).catch(() => null);
+  const planning = (activeStrategy?.totalItems ?? 0) > 0;
+  const factsRes = await pb.collection("business_facts").getList(1, 60, { filter: `website = "${website.id}"`, fields: "id,fact_type,label,value,source_url,verification_state,provenance", requestKey: null }).catch(() => null);
+  const learned = (factsRes?.items ?? []) as unknown as Array<{ id: string; fact_type: string; label: string; value: string; source_url: string; verification_state: string; provenance: string }>;
+  const langName: Record<string, string> = { es: "Spanish", en: "English", pt: "Portuguese", fr: "French" };
+  const lang = String(website.primary_language || "").split("-")[0];
   const pubInfo = website as unknown as { connection_status?: string; publishing_enabled?: boolean; publishing_environment?: string };
   const connected = pubInfo.connection_status === "connected" && Boolean(pubInfo.publishing_enabled);
   const posts = await pb.collection("articles").getList(1, 5, { filter: `website = "${website.id}" && status != "rejected"`, sort: "-updated", fields: "id,title,primary_keyword,status,qa_score", requestKey: null }).catch(() => null);
@@ -68,11 +74,11 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
     postsPerMonth: Number((ap?.policy as { posts_per_month?: number } | undefined)?.posts_per_month) || 0,
   };
   const steps = [
-    { done: hasAnalysis, label: "Read your website", hint: hasAnalysis ? `${snapshot?.total_pages ?? 0} pages found` : "We scan your pages (1–3 min)", action: !hasAnalysis || isRunning ? (isRunning && latestJob ? <CrawlProgress jobId={latestJob.id} /> : <AnalyzeButton websiteId={website.id} hasAnalyzed={hasAnalysis} />) : null },
-    { done: hasPlan, label: "Find what to write about", hint: hasPlan ? "Keyword plan ready" : "We pick topics your buyers search for", action: hasAnalysis && !hasPlan ? <StrategyGenerateButton websiteId={website.id} hasStrategy={false} /> : null },
-    { done: connected, label: "Connect your website", hint: connected ? `Publishing to ${pubInfo.publishing_environment === "staging" ? "staging" : "your site"}` : "Publish without copy/paste", action: !connected ? <Link href={`/websites/${website.id}/publishing`}><Button variant="secondary">Connect</Button></Link> : null },
+    { done: hasAnalysis && !isRunning, label: "Read the website and learn the business", hint: isRunning ? "Reading pages, services, areas, phone… (1–3 min)" : hasAnalysis ? `${snapshot?.total_pages ?? 0} pages · ${learned.length} facts learned${lang ? ` · writes in ${langName[lang] ?? lang}` : ""}` : "We scan the site (1–3 min)", action: isRunning && latestJob ? <CrawlProgress jobId={latestJob.id} /> : !hasAnalysis ? <AnalyzeButton websiteId={website.id} hasAnalyzed={false} /> : null },
+    { done: hasPlan && !planning, label: "Pick what to write about", hint: planning ? "Choosing topics your buyers search for… (automatic)" : hasPlan ? "Topics ready" : "Starts automatically after the scan", action: hasAnalysis && !hasPlan && !planning && !isRunning ? <StrategyGenerateButton websiteId={website.id} hasStrategy={false} /> : null },
+    { done: connected, label: "Connect your website", hint: connected ? `Publishing to ${pubInfo.publishing_environment === "staging" ? "staging" : "your site"}` : "Optional — posts can wait in Today until then", action: !connected ? <Link href={`/websites/${website.id}/publishing`}><Button variant="secondary">Connect</Button></Link> : null },
   ];
-  const ready = steps.every((st) => st.done);
+  const ready = steps[0].done && steps[1].done;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -102,6 +108,33 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
             ))}
           </ol>
         </div>
+      )}
+
+      {/* What we learned from the site */}
+      {learned.length > 0 && (
+        <details className="rounded-2xl border border-slate-200 bg-white px-5 py-4">
+          <summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-900">
+            What we learned from the site
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{learned.length}</span>
+            {lang && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700">Posts in {langName[lang] ?? lang}</span>}
+          </summary>
+          <ul className="mt-3 divide-y divide-slate-100">
+            {learned.map((f) => (
+              <li key={f.id} className="flex items-start gap-3 py-2 text-sm">
+                <span className="w-24 shrink-0 text-xs font-medium uppercase tracking-wide text-slate-400">{f.label || f.fact_type}</span>
+                <span className="min-w-0 flex-1 text-slate-800">{String(f.value).replace(/<[^>]*>/g, "")}</span>
+                {f.verification_state === "verified" || f.verification_state === "user_confirmed"
+                  ? <span className="shrink-0 text-xs text-emerald-600">✓ on site</span>
+                  : <span className="shrink-0 text-xs text-amber-600" title="Prices and promotions are never stated in posts until you confirm them">not used</span>}
+                {f.source_url && <a href={f.source_url} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-sky-700 hover:underline">source</a>}
+              </li>
+            ))}
+          </ul>
+          <form action={relearnWebsiteAction} className="mt-3">
+            <input type="hidden" name="websiteId" value={website.id} />
+            <button className="text-xs font-medium text-sky-700 hover:underline">Re-read the website</button>
+          </form>
+        </details>
       )}
 
       {/* Recent posts */}

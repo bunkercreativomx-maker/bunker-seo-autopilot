@@ -144,6 +144,10 @@ export async function runCrawl(websiteDomain, opts = {}) {
           canonicalHttpError,
           local_signals: seo.local_signals,
           og: seo.og,
+          text_excerpt: seo.text_excerpt,
+          platform_hint: seo.platform_hint,
+          emails: seo.emails,
+          phones: seo.phones,
           crawl_depth: pathDepthOf(norm),
           last_crawled_at: new Date().toISOString(),
         };

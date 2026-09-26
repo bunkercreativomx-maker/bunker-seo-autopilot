@@ -10,6 +10,11 @@ import { resolveHref, sameHost, normalizeUrl, isSkipScheme } from "./normalize.j
 export function extractSeo(html, pageUrl) {
   const $ = cheerio.load(html);
 
+  // --- platform hint (for auto-setup) ---
+  const generator = ($('meta[name="generator" i]').attr("content") || "").toLowerCase();
+  const platformHint = /wordpress/.test(generator) || /\/wp-content\/|\/wp-includes\//.test(html) ? "wordpress"
+    : (/id="__next"|__NEXT_DATA__|\/_next\/static\//.test(html) ? "nextjs" : "");
+
   // --- title ---
   const title = $("head title").first().text().trim() || "";
 
@@ -70,6 +75,9 @@ export function extractSeo(html, pageUrl) {
   $("script, style, noscript, svg, template").remove();
   const textContent = $("body").text().replace(/\s+/g, " ").trim();
   const wordCount = textContent ? textContent.split(" ").filter(Boolean).length : 0;
+  // Short visible-text excerpt, used ONLY in memory by the auto-setup profile
+  // step (never persisted).
+  const textExcerpt = textContent.slice(0, 6000);
   // content hash over visible text
   const contentHash = hashString(textContent);
 
@@ -92,6 +100,18 @@ export function extractSeo(html, pageUrl) {
   });
   // count unique internal destinations
   const uniqueInternal = new Set(internalLinks.map((l) => l.url));
+
+  // --- emails (mailto:) for the auto-setup profile ---
+  const emails = [];
+  $('a[href^="mailto:" i]').each((_, el) => {
+    const v = ($(el).attr("href") || "").replace(/^mailto:/i, "").split("?")[0].trim().toLowerCase();
+    if (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(v) && !emails.includes(v)) emails.push(v);
+  });
+  const phones = [];
+  $('a[href^="tel:" i]').each((_, el) => {
+    const v = ($(el).attr("href") || "").replace(/^tel:/i, "").trim();
+    if (v && !phones.includes(v)) phones.push(v);
+  });
 
   // --- images ---
   let images = 0;
@@ -144,6 +164,10 @@ export function extractSeo(html, pageUrl) {
     images: imageList.slice(0, 200),
     local_signals: localSignals,
     title_duplicate_group: null,
+    text_excerpt: textExcerpt,
+    platform_hint: platformHint,
+    emails: emails.slice(0, 10),
+    phones: phones.slice(0, 10),
   };
 }
 
