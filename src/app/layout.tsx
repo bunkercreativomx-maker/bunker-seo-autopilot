@@ -14,10 +14,10 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Bunker SEO Autopilot",
-    template: "%s · Bunker SEO Autopilot",
+    default: "Bunker Rank",
+    template: "%s · Bunker Rank",
   },
-  description: "Multi-tenant SEO platform — research, strategy, content, publishing and analytics.",
+  description: "Bunker Rank — SEO on autopilot: a fresh, fact-checked article on your site every day.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { login, type LoginState } from "@/app/actions/auth";
+import { BrandMark } from "@/components/brand";
 
 export default function LoginPage() {
   const [state, formAction, pending] = useActionState<LoginState, FormData>(login, undefined);
@@ -10,10 +11,10 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-slate-900 px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center">
-          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-sky-500 text-xl font-bold text-white">
-            B
-          </div>
-          <h1 className="text-xl font-semibold text-white">Bunker SEO Autopilot</h1>
+          <BrandMark className="mb-3 h-14 w-14" />
+          <h1 className="text-xl font-bold tracking-tight text-white">
+            Bunker <span className="text-sky-500">Rank</span>
+          </h1>
           <p className="mt-1 text-sm text-slate-400">Sign in to your workspace</p>
         </div>
 

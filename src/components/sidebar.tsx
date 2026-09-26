@@ -1,5 +1,6 @@
 "use client";
 
+import { BrandMark, BrandName } from "@/components/brand";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
@@ -61,10 +62,10 @@ export function Sidebar({ orgName }: { orgName: string }) {
       {/* Desktop sidebar */}
       <aside className="hidden w-64 shrink-0 flex-col bg-slate-900 md:flex">
         <div className="flex h-16 items-center gap-2 border-b border-slate-800 px-5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500 text-sm font-bold text-white">B</div>
+          <BrandMark className="h-8 w-8" />
           <div className="leading-tight">
-            <div className="text-sm font-semibold text-white">Bunker SEO</div>
-            <div className="text-[11px] text-slate-400">Autopilot</div>
+            <BrandName />
+            <div className="text-[11px] text-slate-400">SEO on autopilot</div>
           </div>
         </div>
         {nav}
@@ -77,8 +78,8 @@ export function Sidebar({ orgName }: { orgName: string }) {
       {/* Mobile top bar + drawer */}
       <div className="flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4 md:hidden">
         <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500 text-xs font-bold text-white">B</div>
-          <span className="text-sm font-semibold text-slate-900">Bunker SEO</span>
+          <BrandMark className="h-7 w-7" />
+          <BrandName dark={false} />
         </div>
         <button
           onClick={() => setOpen(!open)}
@@ -98,8 +99,8 @@ export function Sidebar({ orgName }: { orgName: string }) {
         <div className="fixed inset-0 z-40 flex md:hidden">
           <div className="w-64 bg-slate-900" onClick={(e) => e.stopPropagation()}>
             <div className="flex h-14 items-center gap-2 border-b border-slate-800 px-5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500 text-xs font-bold text-white">B</div>
-              <span className="text-sm font-semibold text-white">Bunker SEO</span>
+              <BrandMark className="h-7 w-7" />
+              <BrandName />
             </div>
             {nav}
           </div>

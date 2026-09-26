@@ -1,8 +1,40 @@
 @import "tailwindcss";
 
+/*
+ * Bunker Rank brand theme.
+ * The UI uses Tailwind's `sky-*` as the accent and `slate-*` as neutrals, so
+ * both scales are remapped here: sky -> Bunker orange, slate -> warm graphite.
+ * Changing the brand again = edit these two scales only.
+ */
+@theme {
+  --color-sky-50: #fff6ed;
+  --color-sky-100: #ffead4;
+  --color-sky-200: #ffd0a8;
+  --color-sky-300: #ffae70;
+  --color-sky-400: #ff8a3d;
+  --color-sky-500: #f76b12;
+  --color-sky-600: #e0550a;
+  --color-sky-700: #b9420b;
+  --color-sky-800: #933611;
+  --color-sky-900: #772f12;
+  --color-sky-950: #401506;
+
+  --color-slate-50: #f8f7f6;
+  --color-slate-100: #f0efed;
+  --color-slate-200: #e3e1de;
+  --color-slate-300: #cbc8c4;
+  --color-slate-400: #9d9993;
+  --color-slate-500: #75716c;
+  --color-slate-600: #58554f;
+  --color-slate-700: #43403c;
+  --color-slate-800: #2a2825;
+  --color-slate-900: #1c1f24;
+  --color-slate-950: #121417;
+}
+
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --background: #f8f7f6;
+  --foreground: #1c1f24;
 }
 
 @theme inline {
@@ -16,4 +48,8 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+::selection {
+  background: #ffd0a8;
 }

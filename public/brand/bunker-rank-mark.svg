@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="o" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FF8A1F"/>
+      <stop offset="1" stop-color="#F2600C"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="220" fill="#1C1F24"/>
+  <g transform="translate(22,0)">
+    <!-- B silhouette: smooth bowls -->
+    <path fill="url(#o)" stroke="url(#o)" stroke-width="24" stroke-linejoin="round" d="
+      M 300 240 H 566 C 690 240 706 420 646 474 C 770 520 760 784 598 784 H 300 Z"/>
+    <!-- upper counter -->
+    <path fill="#1C1F24" stroke="#1C1F24" stroke-width="28" stroke-linejoin="round" d="
+      M 396 330 H 552 C 610 330 610 416 552 416 H 396 Z"/>
+    <!-- lower counter: three equal rising steps -->
+    <path fill="#1C1F24" stroke="#1C1F24" stroke-width="28" stroke-linejoin="round" d="
+      M 396 694 V 640 H 464 V 586 H 532 V 532 H 600 V 694 Z"/>
+  </g>
+</svg>
