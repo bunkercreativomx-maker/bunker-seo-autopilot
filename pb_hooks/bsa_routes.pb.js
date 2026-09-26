@@ -85,6 +85,25 @@ routerAdd("POST", "/api/bsa/logout", (e) => {
 // ---------------------------------------------------------------- Phase 5: publishing
 // Queue-only endpoints: nothing here contacts a website. The independent
 // bunker-seo-publisher worker performs every outbound request.
+// One-click connect (Vercel rewrite to the Bunker Rank blog hub).
+routerAdd("POST", "/api/bsa/connect/info", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const c = require(`${__hooks}/bsa_connect.js`);
+  return lib.handle(e, (actor, body) => c.info(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/connect/verify", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const c = require(`${__hooks}/bsa_connect.js`);
+  return lib.handle(e, (actor, body) => c.verify(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/connect/disconnect", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  const c = require(`${__hooks}/bsa_connect.js`);
+  return lib.handle(e, (actor, body) => c.disconnect(actor, body));
+}, $apis.requireAuth("users"));
+
 routerAdd("POST", "/api/bsa/publishing/config", (e) => {
   const lib = require(`${__hooks}/bsa_lib.js`);
   const pub = require(`${__hooks}/bsa_publish.js`);

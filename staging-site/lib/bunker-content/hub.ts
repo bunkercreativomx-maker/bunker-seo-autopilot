@@ -30,7 +30,9 @@ function pbUrl() {
   if (!u) throw new Error("BUNKER_POCKETBASE_URL is missing");
   return u;
 }
-const revalidate = () => Number(process.env.BUNKER_REVALIDATE_SECONDS || 300);
+// Hub default: 30 s so approvals/edits show up (and publisher verification sees
+// the new version) quickly; the public API is cheap and behind Cloudflare.
+const revalidate = () => Number(process.env.BUNKER_REVALIDATE_SECONDS || 30);
 
 export async function getSite(id: string): Promise<SiteProfile | null> {
   if (!ID_RE.test(id)) return null;

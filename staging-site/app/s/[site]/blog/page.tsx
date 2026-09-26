@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getSite, isNoindex, listFor, publicUrl } from "@/lib/bunker-content/hub";
+import { t } from "@/lib/bunker-content/i18n";
 
 export const dynamic = "force-dynamic";
 type Props = { params: Promise<{ site: string }> };
@@ -11,7 +12,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!s) return { title: "Not found", robots: { index: false } };
   return {
     title: `Blog — ${s.name}`,
-    description: `Artículos y guías de ${s.name}${s.service_area ? ` en ${s.service_area}` : ""}.`,
+    description: t(s.language).desc(s.name, s.service_area),
     alternates: { canonical: publicUrl(s) },
     robots: isNoindex(s) ? { index: false, follow: false } : undefined,
   };
@@ -22,14 +23,15 @@ export default async function HubIndex({ params }: Props) {
   const s = await getSite(site);
   if (!s) notFound();
   const posts = await listFor(site);
-  const fmt = (d: string) => (d ? new Date(d).toLocaleDateString(s.language?.startsWith("en") ? "en-US" : "es-MX", { day: "numeric", month: "long", year: "numeric" }) : "");
+  const L = t(s.language);
+  const fmt = (d: string) => (d ? new Date(d).toLocaleDateString(L.locale, { day: "numeric", month: "long", year: "numeric" }) : "");
   return (
     <section>
       <div className="hub-hero">
         <h1>Blog</h1>
-        <p>Guías y respuestas claras de {s.name}.</p>
+        <p>{L.heroSub(s.name)}</p>
       </div>
-      {posts.length === 0 ? <p className="meta">Pronto publicaremos nuestros primeros artículos.</p> : null}
+      {posts.length === 0 ? <p className="meta">{L.empty}</p> : null}
       <div className="hub-grid">
         {posts.map((p) => (
           <a key={p.slug} className="hub-card" href={publicUrl(s, p.slug)}>

@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   metadataBase: process.env.BUNKER_SITE_URL ? new URL(process.env.BUNKER_SITE_URL) : undefined,
-  title: { default: process.env.BUNKER_SITE_NAME || "Bunker Publishing Sandbox", template: `%s` },
+  title: { default: process.env.BUNKER_SITE_NAME || "Bunker Rank Blog", template: `%s` },
   robots: process.env.BUNKER_STAGING_NOINDEX === "1" ? { index: false, follow: false } : undefined,
 };
 

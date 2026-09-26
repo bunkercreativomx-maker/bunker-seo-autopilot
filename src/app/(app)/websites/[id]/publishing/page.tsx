@@ -7,6 +7,8 @@ import { PublishingForm } from "@/components/publishing/publishing-form";
 import { savePublishingConfigAction, saveSecretAction, testConnectionAction } from "@/app/actions/publishing";
 import { CONNECTION_LABELS, PUBLISHER_LABELS, connectionTone, type ConnectionStatus, type PublisherType } from "@/lib/publishing/types";
 import { formatDateTime } from "@/lib/format";
+import { ConnectWebsite } from "@/components/publishing/connect-website";
+import { connectSnippets } from "@/lib/connect";
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +25,27 @@ export default async function WebsitePublishingPage({ params }: { params: Promis
   const lastPublication = jobs.find((j) => j.status === "published");
   const hidden = { websiteId: w.id };
 
+  const snippets = connectSnippets(w.id);
+  const hubConnected = w.publisher_type === "pocketbase_cms" && w.publishing_environment === "production" && w.connection_status === "connected";
+  const otherPublisher = Boolean(w.publisher_type && w.publisher_type !== "pocketbase_cms");
+
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader title="Connect website" subtitle={`Show your posts at ${w.domain}/blog — one time, about 5 minutes.`} />
+        <CardBody>
+          {otherPublisher ? (
+            <p className="text-sm text-slate-600">This website publishes through <strong>{PUBLISHER_LABELS[w.publisher_type as PublisherType] ?? w.publisher_type}</strong> ({CONNECTION_LABELS[conn] ?? conn}). Manage it in Advanced settings below.</p>
+          ) : (
+            <ConnectWebsite websiteId={w.id} domain={String(w.domain || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "")} snippet={snippets.file} rewriteLines={snippets.lines}
+              connected={hubConnected} lastError={w.connection_status === "invalid_response" ? w.last_connection_error : undefined} admin={admin} />
+          )}
+        </CardBody>
+      </Card>
+
+      <details className="group">
+        <summary className="cursor-pointer select-none text-sm font-medium text-slate-500 hover:text-slate-800">Advanced settings (WordPress, API, webhook, history)</summary>
+        <div className="mt-4 space-y-6">
       <div className="grid gap-4 md:grid-cols-4">
         <Card><CardBody><p className="text-xs text-slate-500">Publisher status</p><div className="mt-1"><Badge tone={connectionTone(conn)}>{CONNECTION_LABELS[conn] ?? conn}</Badge></div></CardBody></Card>
         <Card><CardBody><p className="text-xs text-slate-500">Publishing</p><p className="mt-1 text-sm font-semibold">{w.publishing_enabled ? "Enabled" : "Disabled"} · {w.publishing_mode || "manual"}</p></CardBody></Card>
@@ -127,6 +148,8 @@ export default async function WebsitePublishingPage({ params }: { params: Promis
           )}
         </CardBody>
       </Card>
+        </div>
+      </details>
     </div>
   );
 }
