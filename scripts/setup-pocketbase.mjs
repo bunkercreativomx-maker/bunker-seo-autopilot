@@ -1326,6 +1326,7 @@ async function main() {
     { name: "publish_after_human_approval", type: "bool" },
     { name: "auto_pick_opportunities", type: "bool" },
     { name: "auto_publish_safe", type: "bool" },
+    { name: "posts_per_month", type: "number", min: 0, max: 31, onlyInt: true },
     { name: "publish_after_approval_since", type: "date", required: false },
     { name: "pause_on_high_risk", type: "bool" },
     { name: "pause_on_fact_failure", type: "bool" },

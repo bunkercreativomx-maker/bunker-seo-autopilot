@@ -87,6 +87,43 @@ function priorityFromScore(score) {
   return "low";
 }
 
+// ---------------------------------------------------------------- monthly plan
+// Package = posts per month (7 / 15 / 30). Posting days are spread evenly over
+// the month in the website's timezone. Keep in sync with src/lib/plan.ts.
+export function planDays(postsPerMonth, daysInMonth) {
+  const n = Math.max(0, Math.min(Math.floor(Number(postsPerMonth) || 0), daysInMonth));
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(1 + Math.floor((i * daysInMonth) / n));
+  return out;
+}
+
+export function localDate(ms, timeZone) {
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat("en-CA", { timeZone: timeZone || "UTC", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(ms));
+  } catch {
+    parts = new Intl.DateTimeFormat("en-CA", { timeZone: "UTC", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(ms));
+  }
+  const g = (t) => Number(parts.find((x) => x.type === t).value);
+  const year = g("year"), month = g("month"), day = g("day");
+  return { year, month, day, daysInMonth: new Date(Date.UTC(year, month, 0)).getUTCDate(), key: `${year}-${String(month).padStart(2, "0")}` };
+}
+
+// null = allowed; otherwise a block. `done` = articles started this month.
+export function monthlyPlanCheck(p, now, done) {
+  const n = Number(p.posts_per_month) || 0;
+  if (n <= 0) return null; // no package: legacy daily/weekly limits only
+  const d = localDate(now, p.timezone);
+  const days = planDays(n, d.daysInMonth);
+  if (done >= days.length) return { code: "PLAN_LIMIT", detail: `monthly package of ${n} posts already covered (${done}/${days.length} this month)` };
+  const due = days.filter((x) => x <= d.day).length;
+  if (done >= due) {
+    const next = days.find((x) => x > d.day);
+    return { code: "PLAN_NOT_DUE", detail: `package ${n}/month: ${done} of ${due} due so far; next post on day ${next}` };
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- budgets
 
 export function budgetCheck(kind, ctx, planned) {
@@ -101,6 +138,8 @@ export function budgetCheck(kind, ctx, planned) {
       const week = u.content_week + plannedCount("GENERATE_CONTENT");
       if (today >= p.max_content_jobs_per_day) return { code: "BUDGET_LIMIT", detail: `daily article limit ${p.max_content_jobs_per_day} reached (${today})` };
       if (week >= p.max_content_jobs_per_week) return { code: "BUDGET_LIMIT", detail: `weekly article limit ${p.max_content_jobs_per_week} reached (${week})` };
+      const planBlock = monthlyPlanCheck(p, ctx.now, (u.content_month || 0) + plannedCount("GENERATE_CONTENT"));
+      if (planBlock) return planBlock;
     }
     const est = ctx.estimates?.content_job || { calls: null, tokens: null, cost: null };
     const calls = u.ai_calls_today + (est.calls ?? 0);

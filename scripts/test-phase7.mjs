@@ -275,6 +275,14 @@ test("P7 policy: default OFF for every website, safe defaults, FULL_AUTO refused
   await rejects(ap("admin", "run", { websiteId: ids.w }), "AUTOPILOT_OFF");
 });
 
+test("P7 packages: posts per month is stored (7/15/30) and bounded", async () => {
+  const r = await ap("admin", "policy/save", { websiteId: ids.w, postsPerMonth: 15 });
+  assert.equal(r.policy.posts_per_month, 15);
+  await rejects(ap("admin", "policy/save", { websiteId: ids.w, postsPerMonth: 40 }), "INVALID");
+  const back = await ap("admin", "policy/save", { websiteId: ids.w, postsPerMonth: 0 });
+  assert.equal(back.policy.posts_per_month, 0);
+});
+
 test("P7 policy: only admins change it; viewer/editor/cross-tenant refused; direct writes refused", async () => {
   await rejects(ap("viewer", "policy/save", { websiteId: ids.w, mode: "OBSERVE", enabled: true }), "FORBIDDEN");
   await rejects(ap("editor", "policy/save", { websiteId: ids.w, mode: "OBSERVE", enabled: true }), "FORBIDDEN");

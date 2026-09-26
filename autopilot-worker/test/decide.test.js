@@ -338,3 +338,44 @@ test("safe auto-publish respects the weekly publication limit", () => {
   assert.equal(blocked.length, 1);
   assert.equal(blocked[0].block_code, "BUDGET_LIMIT");
 });
+
+// ---------------------------------------------------------------- monthly packages
+test("monthly packages: 7/15/30 posts spread evenly over the month", async () => {
+  const { planDays } = await import("../src/decide.js");
+  assert.deepEqual(planDays(7, 30), [1, 5, 9, 13, 18, 22, 26]);
+  assert.equal(planDays(15, 30).length, 15);
+  assert.deepEqual(planDays(15, 30).slice(0, 4), [1, 3, 5, 7]);
+  assert.deepEqual(planDays(30, 30), Array.from({ length: 30 }, (_, i) => i + 1));
+  assert.equal(planDays(30, 28).length, 28); // February: never more than 1/day
+  assert.deepEqual(planDays(0, 30), []);
+});
+
+test("monthly packages: generation waits for the next planned day and stops at the package size", async () => {
+  const { monthlyPlanCheck } = await import("../src/decide.js");
+  const tz = "America/Ciudad_Juarez";
+  const at = (d) => Date.parse(`2026-09-${String(d).padStart(2, "0")}T15:00:00Z`); // 9:00 Juárez
+  const p7 = { posts_per_month: 7, timezone: tz }; // days 1,5,9,13,18,22,26
+  assert.equal(monthlyPlanCheck(p7, at(1), 0), null);
+  assert.equal(monthlyPlanCheck(p7, at(2), 1).code, "PLAN_NOT_DUE");
+  assert.match(monthlyPlanCheck(p7, at(2), 1).detail, /next post on day 5/);
+  assert.equal(monthlyPlanCheck(p7, at(5), 1), null);
+  assert.equal(monthlyPlanCheck(p7, at(10), 1), null); // behind schedule → catch up (max 1/day still applies)
+  assert.equal(monthlyPlanCheck(p7, at(29), 7).code, "PLAN_LIMIT");
+  assert.equal(monthlyPlanCheck({ posts_per_month: 0 }, at(3), 99), null); // no package → legacy limits only
+  const p30 = { posts_per_month: 30, timezone: tz };
+  assert.equal(monthlyPlanCheck(p30, at(12), 11), null);
+  assert.equal(monthlyPlanCheck(p30, at(12), 12).code, "PLAN_NOT_DUE");
+});
+
+test("monthly packages: budget gate applies the plan to GENERATE_CONTENT only", async () => {
+  const { budgetCheck } = await import("../src/decide.js");
+  const now = Date.parse("2026-09-02T15:00:00Z");
+  const ctx = {
+    now,
+    policy: { ...policy(), posts_per_month: 7, timezone: "America/Ciudad_Juarez", max_content_jobs_per_day: 1, max_content_jobs_per_week: 7 },
+    usage: { actions_today: 0, content_today: 0, content_week: 1, content_month: 1, publications_week: 0, strategy_week: 0, crawls_week: 0, ai_calls_today: 0, ai_tokens_today: 0, ai_cost_today: { known: 0 }, ai_cost_month: { known: 0 } },
+    estimates: { content_job: { calls: null, tokens: null, cost: null } },
+  };
+  assert.equal(budgetCheck("GENERATE_CONTENT", ctx, []).code, "PLAN_NOT_DUE");
+  assert.equal(budgetCheck("PUBLISH", ctx, []), null);
+});

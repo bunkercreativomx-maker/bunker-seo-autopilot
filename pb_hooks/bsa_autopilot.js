@@ -80,12 +80,15 @@ const DEFAULT_POLICY = {
   // selection only — the generated ARTICLE still needs human approval).
   auto_pick_opportunities: false,
   auto_publish_safe: false,
+  // Monthly package (posts per month). 0 = no package (legacy limits only).
+  posts_per_month: 0,
 };
 const LIMIT_BOUNDS = {
   max_actions_per_day: [0, 50], max_content_jobs_per_day: [0, 5], max_content_jobs_per_week: [0, 20], max_publications_per_week: [0, 20],
   max_revision_jobs_per_article: [0, 2], max_strategy_refresh_per_week: [0, 3], max_crawls_per_week: [0, 7],
   max_ai_calls_daily: [0, 1000], max_ai_tokens_daily: [0, 20000000], cooldown_hours: [1, 720], optimization_cooldown_days: [1, 365],
   crawl_max_age_days: [1, 365], strategy_max_age_days: [1, 365], approval_reminder_days: [1, 60],
+  posts_per_month: [0, 31],
 };
 const MONEY_BOUNDS = { max_ai_budget_daily: [0, 500], max_ai_budget_monthly: [0, 5000] };
 
@@ -245,7 +248,7 @@ function consequences(p, website) {
   else {
     if (allowed.indexOf("CRAWL") !== -1) can.push("Refresh a stale crawl (max " + p.max_crawls_per_week + "/week)");
     if (allowed.indexOf("STRATEGY_REFRESH") !== -1) can.push("Refresh a stale strategy (max " + p.max_strategy_refresh_per_week + "/week)");
-    if (allowed.indexOf("GENERATE_CONTENT") !== -1) can.push("Generate drafts from " + (p.auto_pick_opportunities ? "the best Phase 3 topics it picks itself" : "APPROVED opportunities") + " (max " + p.max_content_jobs_per_day + "/day, " + p.max_content_jobs_per_week + "/week)");
+    if (allowed.indexOf("GENERATE_CONTENT") !== -1) can.push("Generate drafts from " + (p.auto_pick_opportunities ? "the best Phase 3 topics it picks itself" : "APPROVED opportunities") + (p.posts_per_month ? " (package: " + p.posts_per_month + " posts/month, spread evenly)" : " (max " + p.max_content_jobs_per_day + "/day, " + p.max_content_jobs_per_week + "/week)"));
     if (allowed.indexOf("REQUEST_REVISION") !== -1) can.push("Request up to " + p.max_revision_jobs_per_article + " automatic Phase 4 revision(s) per article");
     if (allowed.indexOf("RECHECK_CONTENT") !== -1) can.push("Re-run fact check / QA on drafts");
   }

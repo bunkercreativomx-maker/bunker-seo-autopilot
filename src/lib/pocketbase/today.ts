@@ -28,6 +28,7 @@ export type TodaySite = {
   domain: string;
   dailyOn: boolean;
   autoPublish: boolean;
+  postsPerMonth: number;
   connected: boolean;
   environment: string;
   nextRunAt: string;
@@ -86,6 +87,7 @@ export async function loadToday(pb: PocketBase) {
     return {
       id: w.id, name: s(w.name) || s(w.domain), domain: s(w.domain),
       dailyOn: on, autoPublish: Boolean(p?.auto_publish_safe), paused: Boolean(p?.paused),
+      postsPerMonth: Number(p?.posts_per_month) || 0,
       connected: s(w.connection_status) === "connected" && Boolean(w.publishing_enabled),
       environment: s(w.publishing_environment), nextRunAt: s(p?.next_run_at),
     };
@@ -100,7 +102,7 @@ export async function loadToday(pb: PocketBase) {
 }
 
 /** Simple-mode settings for one website: 2 switches, everything else fixed. */
-export async function saveSimpleSettings(pb: PocketBase, websiteId: string, dailyOn: boolean, autoPublish: boolean) {
+export async function saveSimpleSettings(pb: PocketBase, websiteId: string, dailyOn: boolean, autoPublish: boolean, postsPerMonth = 30) {
   return userOperation(pb, "autopilot/policy/save", {
     websiteId,
     enabled: dailyOn,
@@ -114,7 +116,9 @@ export async function saveSimpleSettings(pb: PocketBase, websiteId: string, dail
     autoPublishSafe: autoPublish,
     publishAfterHumanApproval: true,
     allowedActions: ["CRAWL", "STRATEGY_REFRESH", "GENERATE_CONTENT", "RECHECK_CONTENT", "REQUEST_REVISION", "PUBLISH", "VERIFY_PUBLICATION", "UPDATE_PUBLICATION", "AUTO_PUBLISH", "NOTIFY_HUMAN", "WAIT"],
-    // Sensible fixed defaults: 1 post/day, max 7/week, 1 auto-fix per post.
+    // Monthly package (7 / 15 / 30 posts), spread evenly over the month by the
+    // worker. Hard caps stay: max 1 post/day, 7/week, 1 auto-fix per post.
+    postsPerMonth,
     maxContentJobsPerDay: 1, maxContentJobsPerWeek: 7, maxPublicationsPerWeek: 7, maxRevisionJobsPerArticle: 1,
     maxActionsPerDay: 10, maxCrawlsPerWeek: 1, maxStrategyRefreshPerWeek: 1,
   });

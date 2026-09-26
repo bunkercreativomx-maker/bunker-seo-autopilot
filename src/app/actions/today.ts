@@ -64,12 +64,14 @@ export async function siteSettingsAction(_p: TodayState, f: FormData): Promise<T
   const websiteId = str(f, "websiteId");
   const dailyOn = f.get("daily") === "on";
   const autoPublish = f.get("autopublish") === "on";
+  const posts = Number(f.get("posts") || 30);
+  if (![7, 15, 30].includes(posts)) return { error: "Choose 7, 15 or 30 posts per month." };
   try {
     const { pb } = await requireUser();
-    await saveSimpleSettings(pb, websiteId, dailyOn, autoPublish);
+    await saveSimpleSettings(pb, websiteId, dailyOn, autoPublish, posts);
     done();
     revalidatePath(`/websites/${websiteId}`);
-    return { ok: !dailyOn ? "Saved — daily posts are off." : autoPublish ? "Saved — safe posts publish by themselves; the rest wait here." : "Saved — a new post every morning, waiting for your OK." };
+    return { ok: !dailyOn ? "Saved — posting is off." : `Saved — ${posts} posts/month${autoPublish ? "; safe posts publish by themselves" : ", each waiting for your OK"}.` };
   } catch (e) { return { error: msg(e) }; }
 }
 

@@ -65,6 +65,7 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
     dailyOn: Boolean(ap?.policy.enabled) && ap?.policy.mode === "SUPERVISED" && ap?.policy.schedule === "daily",
     autoPublish: Boolean((ap?.policy as { auto_publish_safe?: boolean } | undefined)?.auto_publish_safe), paused: Boolean(ap?.policy.paused), connected,
     environment: String(pubInfo.publishing_environment ?? ""), nextRunAt: String(ap?.policy.next_run_at ?? ""),
+    postsPerMonth: Number((ap?.policy as { posts_per_month?: number } | undefined)?.posts_per_month) || 0,
   };
   const steps = [
     { done: hasAnalysis, label: "Read your website", hint: hasAnalysis ? `${snapshot?.total_pages ?? 0} pages found` : "We scan your pages (1–3 min)", action: !hasAnalysis || isRunning ? (isRunning && latestJob ? <CrawlProgress jobId={latestJob.id} /> : <AnalyzeButton websiteId={website.id} hasAnalyzed={hasAnalysis} />) : null },

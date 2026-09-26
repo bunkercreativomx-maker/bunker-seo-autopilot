@@ -9,7 +9,7 @@
 // publishing targets. Long waits (human approval) park the run; record hooks
 // enqueue triggers and the next worker tick resumes the same run.
 import { deriveSignals } from "./signals.js";
-import { decide, summarize, circuitGroup } from "./decide.js";
+import { decide, summarize, circuitGroup, localDate } from "./decide.js";
 import { classifyError, retryable } from "./signals.js";
 
 export const WORKER_VERSION = "bunker-seo-autopilot/0.7.0";
@@ -31,6 +31,7 @@ const DEFAULTS = {
   cooldown_hours: 24, optimization_cooldown_days: 28, crawl_max_age_days: 14, strategy_max_age_days: 30, approval_reminder_days: 3, timezone: "America/Ciudad_Juarez",
   auto_pick_opportunities: false,
   auto_publish_safe: false,
+  posts_per_month: 0,
 };
 
 export class Engine {
@@ -182,6 +183,11 @@ export class Engine {
     const count = (list, t) => list.filter((a) => t.includes(a.action_type)).length;
     const ai = await this.all("ai_usage", `website = "${esc(websiteId)}" && timestamp >= "${monthStart}"`, { fields: "input_tokens,output_tokens,estimated_cost,cost_status,timestamp" });
     const aiToday = ai.filter((r) => String(r.timestamp).replace("T", " ") >= dayStart);
+    // Monthly package: articles started in the current month (website timezone).
+    const policyTz = (await this.col("autopilot_policies").getFirstListItem(`website = "${esc(websiteId)}"`, { fields: "timezone", requestKey: null }).catch(() => null))?.timezone;
+    const monthKey = localDate(now, policyTz).key;
+    const monthActs = await this.all("autopilot_actions", `website = "${esc(websiteId)}" && action_type = "GENERATE_CONTENT" && created_at >= "${pbDate(now - 32 * DAY)}" && ${executed}`, { fields: "created_at" });
+    const contentMonth = monthActs.filter((a) => localDate(Date.parse(String(a.created_at).replace(" ", "T")), policyTz).key === monthKey).length;
     const cost = (rows) => {
       const known = rows.filter((r) => r.cost_status === "calculated");
       const unknown = rows.length - known.length;
@@ -191,6 +197,7 @@ export class Engine {
       actions_today: today.length,
       content_today: count(today, ["GENERATE_CONTENT"]),
       content_week: count(acts, ["GENERATE_CONTENT"]),
+      content_month: contentMonth,
       publications_week: count(acts, ["PUBLISH", "UPDATE_PUBLICATION", "AUTO_PUBLISH"]),
       strategy_week: count(acts, ["STRATEGY_REFRESH"]),
       crawls_week: count(acts, ["CRAWL"]),

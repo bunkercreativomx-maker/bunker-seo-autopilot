@@ -1,5 +1,6 @@
 "use client";
 
+import { PACKAGES } from "@/lib/plan";
 import { useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -116,6 +117,7 @@ export function SiteRow({ site, canEdit }: { site: TodaySite; canEdit: boolean }
   const now = useAct(writeNowAction);
   const [daily, setDaily] = useState(site.dailyOn);
   const [auto, setAuto] = useState(site.autoPublish);
+  const [posts, setPosts] = useState(site.postsPerMonth || 30);
   return (
     <div className="flex flex-wrap items-center gap-3 py-3">
       <div className="min-w-0 flex-1">
@@ -129,15 +131,39 @@ export function SiteRow({ site, canEdit }: { site: TodaySite; canEdit: boolean }
       <form action={save.run} className="flex items-center gap-2">
         <input type="hidden" name="websiteId" value={site.id} />
         <input type="hidden" name="autopublish" value={auto ? "on" : "off"} />
-        <span className="text-xs text-slate-600">Daily post</span>
+        <input type="hidden" name="posts" value={posts} />
+        <span className="text-xs text-slate-600">Posting</span>
         <Toggle name="daily" checked={daily} disabled={!canEdit || save.pending} onChange={setDaily} />
       </form>
       {daily && (
         <form action={save.run} className="flex items-center gap-2" title="Publishes by itself only when the post scores 85+, passes the fact check and has no sensitive topics or unverified claims. Anything else waits here for you.">
           <input type="hidden" name="websiteId" value={site.id} />
           <input type="hidden" name="daily" value="on" />
+          <input type="hidden" name="posts" value={posts} />
           <span className="text-xs text-slate-600">Auto-publish safe posts</span>
           <Toggle name="autopublish" checked={auto} disabled={!canEdit || save.pending || !site.connected} onChange={setAuto} />
+        </form>
+      )}
+      {daily && (
+        <form action={save.run} className="flex items-center gap-1" aria-label="Posts per month">
+          <input type="hidden" name="websiteId" value={site.id} />
+          <input type="hidden" name="daily" value="on" />
+          <input type="hidden" name="autopublish" value={auto ? "on" : "off"} />
+          <input type="hidden" name="posts" value={posts} />
+          <div className="inline-flex rounded-lg bg-slate-100 p-0.5">
+            {PACKAGES.map((n) => (
+              <button
+                key={n}
+                type="submit"
+                disabled={!canEdit || save.pending}
+                onClick={(e) => { setPosts(n); (e.currentTarget.form!.elements.namedItem("posts") as HTMLInputElement).value = String(n); }}
+                className={cn("rounded-md px-2.5 py-1 text-xs font-semibold transition", posts === n ? "bg-white text-sky-700 shadow-sm" : "text-slate-500 hover:text-slate-800")}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <span className="text-xs text-slate-500">/ month</span>
         </form>
       )}
       {daily && canEdit && (
