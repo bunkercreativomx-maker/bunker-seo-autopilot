@@ -30,11 +30,15 @@ const DEFAULTS = {
   require_human_publish_approval: true, publish_after_human_approval: false, pause_on_high_risk: true, pause_on_fact_failure: true, pause_on_integration_error: true,
   cooldown_hours: 24, optimization_cooldown_days: 28, crawl_max_age_days: 14, strategy_max_age_days: 30, approval_reminder_days: 3, timezone: "America/Ciudad_Juarez",
   auto_pick_opportunities: false,
+  auto_publish_safe: false,
 };
 
 export class Engine {
-  constructor(pb, { now = () => Date.now(), logger = console, workerId = "autopilot-1", execute = null, leaseSeconds = 180, staleQueueMs = 30 * 60_000 } = {}) {
+  constructor(pb, { now = () => Date.now(), logger = console, workerId = "autopilot-1", execute = null, leaseSeconds = 180, staleQueueMs = 30 * 60_000, telegram = null, appUrl = "", images = null } = {}) {
     this.pb = pb;
+    this.images = images;
+    this.telegram = telegram;
+    this.appUrl = String(appUrl || "").replace(/\/+$/, "");
     this.now = now;
     this.logger = logger;
     this.workerId = workerId;
@@ -91,6 +95,33 @@ export class Engine {
     }
     const n = await this.col("notifications").create({ organization: scope.organization, website: scope.website || "", kind: fields.kind, severity: fields.severity || "info", title: fields.title, body: fields.body || "", link: fields.link || "", dedupe_key: key, occurrences: 1, created_at: this.ts(), updated_at: this.ts() }, { requestKey: null });
     return n.id;
+  }
+
+  // Short human notice (Telegram). Deduplicated by the caller's key through the
+  // notifications table so the same event never pings twice.
+  async ping(scope, key, text) {
+    if (!this.telegram) return;
+    const k = `tg:${key}`.slice(0, 200);
+    const seen = await this.first("notifications", `organization = "${esc(scope.organization)}" && dedupe_key = "${esc(k)}"`);
+    if (seen) return;
+    await this.col("notifications").create({ organization: scope.organization, website: scope.website || "", kind: "telegram", severity: "info", title: text.slice(0, 300), body: "", link: "", dedupe_key: k, occurrences: 1, read_at: this.ts(), created_at: this.ts(), updated_at: this.ts() }, { requestKey: null });
+    const w = scope.website ? await this.one("websites", scope.website) : null;
+    await this.telegram(`${w ? `[${w.name || w.domain}] ` : ""}${text}${this.appUrl ? `\n${this.appUrl}/today` : ""}`);
+  }
+
+  // One image attempt per article version per day (FAL); a failure never blocks the post.
+  async ensureImage(run, art) {
+    if (!this.images || art.featured_image) return;
+    const k = `img:${art.id}:v${art.current_version}:${this.ts().slice(0, 10)}`;
+    if (await this.first("notifications", `organization = "${esc(run.organization)}" && dedupe_key = "${esc(k)}"`)) return;
+    const r = await this.images(art);
+    await this.col("notifications").create({ organization: run.organization, website: run.website, kind: "autopilot_image", severity: r.ok ? "info" : "warning", title: r.ok ? `Image added: ${art.title || ""}`.slice(0, 300) : `Image not generated (${r.code})`, body: "", link: "", dedupe_key: k, occurrences: 1, read_at: this.ts(), created_at: this.ts(), updated_at: this.ts() }, { requestKey: null });
+    if (!r.ok) return;
+    const fresh = await this.one("articles", art.id);
+    // Only before approval and only if still the same version: never alters approved content.
+    if (!fresh || fresh.status !== "awaiting_approval" || Number(fresh.current_version) !== Number(art.current_version) || fresh.featured_image) return;
+    await this.col("articles").update(art.id, { featured_image: r.url, updated_at: this.ts() }, { requestKey: null });
+    art.featured_image = r.url;
   }
 
   async task(scope, { kind, title, body = "", link = "", evidence = {}, dedup_key, run = "", action = "", remindDays = 0, notify = true, severity = "warning" }) {
@@ -160,7 +191,7 @@ export class Engine {
       actions_today: today.length,
       content_today: count(today, ["GENERATE_CONTENT"]),
       content_week: count(acts, ["GENERATE_CONTENT"]),
-      publications_week: count(acts, ["PUBLISH", "UPDATE_PUBLICATION"]),
+      publications_week: count(acts, ["PUBLISH", "UPDATE_PUBLICATION", "AUTO_PUBLISH"]),
       strategy_week: count(acts, ["STRATEGY_REFRESH"]),
       crawls_week: count(acts, ["CRAWL"]),
       ai_calls_today: aiToday.length,
@@ -244,7 +275,7 @@ export class Engine {
     const managed = new Set(managedActs.filter((a) => a.action_type === "GENERATE_CONTENT").map((a) => a.article));
     const revisions = {};
     for (const a of managedActs) if (a.action_type === "REQUEST_REVISION" && !["skipped", "cancelled", "blocked", "planned"].includes(a.status)) revisions[a.article] = (revisions[a.article] || 0) + 1;
-    const arts = await this.all("articles", `website = "${wid}"`, { fields: "id,status,title,primary_keyword,recommended_url,content_opportunity,current_version,qa_status,fact_check_status,high_risk,approved_by,approved_at,approved_version,approved_hash,updated_at,expand.approved_by.name", expand: "approved_by" });
+    const arts = await this.all("articles", `website = "${wid}"`, { fields: "id,status,title,primary_keyword,recommended_url,content_opportunity,current_version,qa_status,qa_score,flags,risk_categories,fact_check_status,high_risk,approved_by,approved_at,approved_version,approved_hash,updated_at,expand.approved_by.name", expand: "approved_by" });
     const pubs = await this.all("article_publications", `website = "${wid}"`, { fields: "id,article,status,public_url,article_version,published_at,updated,updated_at" });
     const pubBy = Object.fromEntries(pubs.map((p) => [p.article, p]));
     const outcomes = await this.all("autopilot_outcomes", `website = "${wid}"`, { fields: "article,changed_at", sort: "-changed_at" });
@@ -355,14 +386,18 @@ export class Engine {
       if (art.status === "failed") return done("failed", { article_status: art.status }, { code: "CONTENT_FAILED", message: "Phase 4 pipeline failed" });
       return "running";
     }
-    if (["PUBLISH", "UPDATE_PUBLICATION", "VERIFY_PUBLICATION"].includes(a.action_type)) {
+    if (["PUBLISH", "UPDATE_PUBLICATION", "VERIFY_PUBLICATION", "AUTO_PUBLISH"].includes(a.action_type)) {
       const j = await this.one("publish_jobs", a.job_id);
       if (!j) return done("failed", {}, { code: "JOB_MISSING", message: "Publish job not found" });
       if (["queued", "validating", "publishing", "verifying", "unpublishing"].includes(j.status)) return "running";
       if (j.status === "published" || j.status === "completed") {
         const pub = j.publication ? await this.one("article_publications", j.publication) : await this.first("article_publications", `article = "${esc(a.article)}"`);
         const r = await done("completed", { publish_status: j.status, public_url: j.public_url || pub?.public_url || "", article_version: j.article_version, verified_at: pub?.last_verified_at || "", environment: a.result?.environment || "" });
-        if (a.action_type !== "VERIFY_PUBLICATION") await this.recordOutcome(run, a, j, pub);
+        if (a.action_type !== "VERIFY_PUBLICATION") {
+          await this.recordOutcome(run, a, j, pub);
+          const art = await this.one("articles", a.article).catch(() => null);
+          await this.ping(run, `pub:${a.id}`, `✅ ${a.action_type === "AUTO_PUBLISH" ? "Auto-published" : "Published"}: "${art?.title || "post"}"${j.public_url || pub?.public_url ? `\n${j.public_url || pub?.public_url}` : ""}`);
+        }
         await this.closeTasks(run.website, `kind = "article_approval" && dedup_key ~ "${esc(a.article)}"`, "published");
         return r;
       }
@@ -492,6 +527,7 @@ export class Engine {
       await this.circuit(run, a.action_type, cls, code);
       if (code === "SLUG_CONFLICT") await this.task(run, { kind: "slug_conflict", title: "Resolve slug conflict before publishing", body: message, dedup_key: `slug:${a.target_id}`, link: `/articles/${a.target_id}` });
       if (code === "HIGH_RISK_REVIEW_REQUIRED") await this.task(run, { kind: "high_risk_review", title: "High-risk article — publish manually after review", body: message, dedup_key: `highrisk:${a.target_id}`, link: `/articles/${a.target_id}` });
+      if (cls === "CONFIGURATION" && a.action_type.includes("PUBLISH")) await this.ping(run, `integ:${run.website}:${code}:${this.ts().slice(0, 10)}`, `⚠️ Could not publish — website connection problem (${code}).`);
       if (cls === "CONFIGURATION" && a.action_type.includes("PUBLISH")) await this.task(run, { kind: "publishing_integration", title: "Fix the publishing integration", body: message, dedup_key: `integration:${run.website}:${code}`, severity: "critical", link: `/websites/${run.website}/publishing` });
       return { ok: false, code, cls };
     }
@@ -621,11 +657,15 @@ export class Engine {
       if (!art) continue;
       const key = `approval:${art.id}:v${art.current_version}`;
       if (art.status === "awaiting_approval") {
+        await this.ensureImage(run, art);
         const t = await this.task(run, { kind: "article_approval", title: `Article ready for approval: ${art.title || art.primary_keyword}`, body: `Version ${art.current_version} passed the Phase 4 pipeline (fact check ${art.fact_check_status}, QA ${art.qa_status}${art.high_risk ? ", HIGH RISK" : ""}). Autopilot never approves content.${snapshot.publish_after_human_approval && !art.high_risk ? " After your approval Autopilot will publish this version to the configured staging target." : ""}`, dedup_key: key, run: run.id, link: `/articles/${art.id}`, remindDays: snapshot.approval_reminder_days, severity: "info" });
         // Reminder after N days; stays waiting forever — never auto-approves.
         if (t.status === "open" && t.remind_at && Date.parse(String(t.remind_at).replace(" ", "T")) <= this.now()) {
           await this.notify(run, { kind: "autopilot_article_approval", severity: "info", title: `Reminder: article waiting for approval — ${art.title || art.primary_keyword}`, dedupe_key: `autopilot:${key}`, link: `/articles/${art.id}`, reopen: true });
           await this.col("autopilot_tasks").update(t.id, { reminders_sent: Number(t.reminders_sent || 0) + 1, remind_at: iso(this.now() + snapshot.approval_reminder_days * DAY), updated_at: this.ts() }, { requestKey: null });
+        }
+        if (!(snapshot.auto_publish_safe && art.qa_status === "PASS" && art.fact_check_status === "passed" && !art.high_risk)) {
+          await this.ping(run, `wait:${art.id}:v${art.current_version}`, `👀 Post ready for your OK: "${art.title || art.primary_keyword}"`);
         }
         const first = await this.first("autopilot_run_events", `run = "${run.id}" && kind = "waiting_approval" && action = "${art.id}"`);
         if (!first) {
@@ -655,7 +695,7 @@ export class Engine {
     let waiting = false;
     for (const id of managed) {
       const art = await this.one("articles", id);
-      if (art && (art.status === "awaiting_approval" || (art.status === "approved" && !acts.some((a) => ["PUBLISH", "UPDATE_PUBLICATION"].includes(a.action_type) && a.target_id === id && !["failed", "cancelled", "blocked", "skipped"].includes(a.status)) && snapshot.publish_after_human_approval && !art.high_risk))) waiting = true;
+      if (art && (art.status === "awaiting_approval" || (art.status === "approved" && !acts.some((a) => ["PUBLISH", "UPDATE_PUBLICATION", "AUTO_PUBLISH"].includes(a.action_type) && a.target_id === id && !["failed", "cancelled", "blocked", "skipped"].includes(a.status)) && snapshot.publish_after_human_approval && !art.high_risk))) waiting = true;
     }
     const warnings = acts.some((a) => ["failed", "blocked", "completed_with_warnings"].includes(a.status));
     const usage = await this.runUsage(run, acts);

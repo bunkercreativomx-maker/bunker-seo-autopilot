@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decide, summarize, gate, budgetCheck, missingFacts, scoreOpportunity, circuitGroup, normalizeUrl } from "../src/decide.js";
+import { autoPublishBlockers, decide, summarize, gate, budgetCheck, missingFacts, scoreOpportunity, circuitGroup, normalizeUrl } from "../src/decide.js";
 import { deriveSignals, performanceSignals, classifyError, retryable } from "../src/signals.js";
 
 const NOW = Date.parse("2026-09-25T12:00:00Z");
@@ -8,7 +8,7 @@ const daysAgo = (d) => new Date(NOW - d * 86400000).toISOString();
 
 function policy(over = {}) {
   return {
-    enabled: true, mode: "SUPERVISED", schedule: "weekly", allowed_actions: ["CRAWL", "STRATEGY_REFRESH", "GENERATE_CONTENT", "RECHECK_CONTENT", "REQUEST_REVISION", "PUBLISH", "VERIFY_PUBLICATION", "UPDATE_PUBLICATION", "NOTIFY_HUMAN", "WAIT"],
+    enabled: true, mode: "SUPERVISED", schedule: "weekly", allowed_actions: ["CRAWL", "STRATEGY_REFRESH", "GENERATE_CONTENT", "RECHECK_CONTENT", "REQUEST_REVISION", "PUBLISH", "VERIFY_PUBLICATION", "UPDATE_PUBLICATION", "AUTO_PUBLISH", "NOTIFY_HUMAN", "WAIT"],
     allowed_environments: ["staging"], max_actions_per_day: 10, max_content_jobs_per_day: 1, max_content_jobs_per_week: 3, max_publications_per_week: 3,
     max_revision_jobs_per_article: 1, max_strategy_refresh_per_week: 1, max_crawls_per_week: 1, max_ai_budget_daily: 5, max_ai_budget_monthly: 50,
     max_ai_calls_daily: 60, max_ai_tokens_daily: 2000000, publish_after_human_approval: false, pause_on_fact_failure: true,
@@ -298,4 +298,43 @@ test("auto-pick: approved topics win; one proposed topic per run; review-needing
   assert.ok(!d.some((x) => x.decision_type === "REQUEST_HUMAN_REVIEW"), "no review spam for auto-picked topics");
   assert.ok(d.some((x) => x.signal?.source_record === "p1" && x.decision_type === "NO_ACTION" && x.rule === "content.missing_business_facts"));
   assert.ok(!gen.some((x) => x.planned_action.target_id === "p3"));
+});
+
+// ---------------------------------------------------------------- safe auto-publish
+test("safe auto-publish: only clean posts publish themselves; everything else waits for a human", () => {
+  const base = { managed: true, status: "awaiting_approval", current_version: 2, qa_status: "PASS", qa_score: { score: 92 }, fact_check_status: "passed", high_risk: false, risk_categories: [], flags: ["RESEARCH_LIMITED"] };
+  const arts = [
+    { ...base, id: "ok" },
+    { ...base, id: "low", qa_score: { score: 80 } },
+    { ...base, id: "fact", fact_check_status: "issues" },
+    { ...base, id: "risk", high_risk: true },
+    { ...base, id: "claim", flags: ["UNSUPPORTED_PRICE"] },
+    { ...base, id: "unknownflag", flags: [{ code: "SOMETHING_NEW" }] },
+    { ...base, id: "notmine", managed: false },
+  ];
+  const on = run(ctx({ policy: { auto_publish_safe: true, max_publications_per_week: 10, max_actions_per_day: 20 }, articles: arts }));
+  const auto = on.filter((x) => x.planned_action?.action_type === "AUTO_PUBLISH" && !x.planned_action.blocked).map((x) => x.planned_action.target_id);
+  assert.deepEqual(auto, ["ok"]);
+  for (const id of ["low", "fact", "risk", "claim", "unknownflag"]) assert.ok(on.some((x) => x.signal?.source_record === id && x.rule === "publish.auto_safe.held"), id);
+  assert.ok(!on.some((x) => x.signal?.source_record === "notmine"), "unmanaged articles produce no signal at all");
+  // switch off -> nothing auto-publishes
+  const off = run(ctx({ policy: { auto_publish_safe: false }, articles: arts }));
+  assert.ok(!off.some((x) => x.planned_action?.action_type === "AUTO_PUBLISH"));
+  // not connected / production not allowed -> held
+  const nc = run(ctx({ policy: { auto_publish_safe: true }, articles: [arts[0]], website: { id: "w1", publishing_environment: "staging", connection_status: "error" } }));
+  assert.ok(!nc.some((x) => x.planned_action?.action_type === "AUTO_PUBLISH"));
+  const prod = run(ctx({ policy: { auto_publish_safe: true }, articles: [arts[0]], website: { id: "w1", publishing_environment: "production", connection_status: "connected" } }));
+  assert.ok(!prod.some((x) => x.planned_action?.action_type === "AUTO_PUBLISH"));
+  assert.deepEqual(autoPublishBlockers(arts[0]), []);
+});
+
+test("safe auto-publish respects the weekly publication limit", () => {
+  const base = { managed: true, status: "awaiting_approval", current_version: 1, qa_status: "PASS", qa_score: 95, fact_check_status: "passed", flags: [] };
+  const c = ctx({ policy: { auto_publish_safe: true, max_publications_per_week: 1 }, articles: [{ ...base, id: "x1" }, { ...base, id: "x2" }] });
+  const d = run(c);
+  const ok = d.filter((x) => x.planned_action?.action_type === "AUTO_PUBLISH" && !x.planned_action.blocked);
+  const blocked = d.filter((x) => x.planned_action?.action_type === "AUTO_PUBLISH" && x.planned_action.blocked);
+  assert.equal(ok.length, 1);
+  assert.equal(blocked.length, 1);
+  assert.equal(blocked[0].block_code, "BUDGET_LIMIT");
 });

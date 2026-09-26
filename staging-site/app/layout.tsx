@@ -12,7 +12,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="es">
       <body>
-        {process.env.BUNKER_STAGING_NOINDEX === "1" ? <div className="banner">Staging sandbox — Bunker SEO Autopilot Phase 5. Not a production website.</div> : null}
+        {process.env.BUNKER_STAGING_NOINDEX === "1" && !process.env.BUNKER_HUB ? <div className="banner">Staging sandbox — Bunker SEO Autopilot Phase 5. Not a production website.</div> : null}
         <main>{children}</main>
       </body>
     </html>

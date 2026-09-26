@@ -110,3 +110,10 @@ test("writer prompt: verified contacts, silent omission, no external links on se
   assert.match(seen, /first person plural/);
   assert.doesNotMatch(seen, /25 años/, "unverified warranty is never offered as a CTA/contact detail");
 });
+
+test("Spanish 'todo' is ordinary copy, upper-case TODO is an editorial leftover", async () => {
+  const { scanEditorialLanguage } = await import("../src/checks.js");
+  const codes = (t) => JSON.stringify(scanEditorialLanguage(t));
+  assert.ok(!codes("Un hotel consume energía todo el día y todo el año.").includes("EDITORIAL_NOTE_IN_COPY"));
+  assert.ok(codes("TODO: completar esta sección.").includes("EDITORIAL_NOTE_IN_COPY"));
+});

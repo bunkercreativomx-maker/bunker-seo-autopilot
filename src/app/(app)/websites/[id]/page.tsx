@@ -63,7 +63,7 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
   const site: TodaySite = {
     id: website.id, name: website.name, domain: website.domain,
     dailyOn: Boolean(ap?.policy.enabled) && ap?.policy.mode === "SUPERVISED" && ap?.policy.schedule === "daily",
-    autoPublish: Boolean(ap?.policy.publish_after_human_approval), paused: Boolean(ap?.policy.paused), connected,
+    autoPublish: Boolean((ap?.policy as { auto_publish_safe?: boolean } | undefined)?.auto_publish_safe), paused: Boolean(ap?.policy.paused), connected,
     environment: String(pubInfo.publishing_environment ?? ""), nextRunAt: String(ap?.policy.next_run_at ?? ""),
   };
   const steps = [

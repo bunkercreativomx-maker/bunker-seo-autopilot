@@ -338,7 +338,10 @@ export function isNonClaimText(claimText, markdown = "") {
 // Editorial/meta language that must never appear in public copy: notes to the
 // editor, and warnings to the reader about the client's own claims.
 const EDITORIAL_PATTERNS = [
-  { code: "EDITORIAL_NOTE_IN_COPY", re: /\b(nota (para el )?(editor|redactor|revisor)|note to (the )?editor|editor'?s note|TODO|TBD|placeholder|lorem ipsum)\b/i },
+  { code: "EDITORIAL_NOTE_IN_COPY", re: /\b(nota (para el )?(editor|redactor|revisor)|note to (the )?editor|editor'?s note|placeholder|lorem ipsum)\b/i },
+  // Case-sensitive on purpose: Spanish "todo" (all) is ordinary copy; only the
+  // upper-case markers TODO / TBD are editorial leftovers.
+  { code: "EDITORIAL_NOTE_IN_COPY", re: /\b(TODO|TBD)\b/ },
   { code: "EDITORIAL_NOTE_IN_COPY", re: /\b(formulario sugerido|campos? m[ií]nimos?|suggested form|minimum fields)\b/i },
   { code: "EDITORIAL_NOTE_IN_COPY", re: /\b(este (texto|documento|borrador|contenido) (las )?presenta|this (draft|document|text) presents)\b/i },
   { code: "EDITORIAL_NOTE_IN_COPY", re: /(sujet[oa]s? a verificaci[oó]n|pendiente de verificar|subject to verification|to be (verified|confirmed))/i },

@@ -26,6 +26,31 @@ export const FACT_TOPICS = [
 const REGULATED_RE = /\b(m[eé]dic[oa]s?|salud|tratamiento|diagn[oó]stico|legal|abogad[oa]|ley|impuesto|fiscal|inversi[oó]n|rendimiento|pr[eé]stamo|seguro|medical|health|treatment|lawyer|tax|investment|loan|insurance)\b/i;
 const GENERATE_TYPES = ["create", "service", "location", "expand", "optimize", "refresh"];
 
+// Safe auto-publish (simple mode). Deterministic and fail-closed: any flag
+// that is not a known harmless SEO advisory keeps the post for a human.
+export const AUTO_PUBLISH_MIN_SCORE = 85;
+export const HARMLESS_FLAGS = new Set(["RESEARCH_LIMITED", "META_DESCRIPTION_LENGTH", "SEO_TITLE_LENGTH", "SEO_TITLE_KEYWORD", "SLUG_FORMAT", "MINOR_ADVISORY", "NOT_REQUIRED", "NOT_APPLICABLE"]);
+export function qaScoreOf(a) {
+  const r = a?.qa_score;
+  const n = typeof r === "number" ? r : r && typeof r === "object" && typeof r.score === "number" ? r.score : null;
+  return n === null ? null : Math.round(n);
+}
+export function autoPublishBlockers(a) {
+  const b = [];
+  if (!a) return ["no article"];
+  if (a.status !== "awaiting_approval") b.push(`status ${a.status}`);
+  if (!a.managed) b.push("not written by Autopilot");
+  if (a.qa_status !== "PASS") b.push(`QA ${a.qa_status || "pending"}`);
+  const sc = qaScoreOf(a);
+  if (sc === null || sc < AUTO_PUBLISH_MIN_SCORE) b.push(`score ${sc ?? "none"} < ${AUTO_PUBLISH_MIN_SCORE}`);
+  if (a.fact_check_status !== "passed") b.push(`fact check ${a.fact_check_status || "pending"}`);
+  if (a.high_risk) b.push("sensitive topic");
+  if (Array.isArray(a.risk_categories) && a.risk_categories.length) b.push(`risk: ${a.risk_categories.join(",")}`);
+  const bad = (Array.isArray(a.flags) ? a.flags : []).map((f) => (typeof f === "string" ? f : f?.code || f?.type || JSON.stringify(f))).filter((f) => !HARMLESS_FLAGS.has(f));
+  if (bad.length) b.push(`flags: ${bad.join(",")}`);
+  return b;
+}
+
 export function normalizeText(v) {
   return String(v ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9ñ]+/g, " ").trim();
 }
@@ -86,8 +111,8 @@ export function budgetCheck(kind, ctx, planned) {
     if (u.ai_cost_month.known !== null && u.ai_cost_month.known >= p.max_ai_budget_monthly) return { code: "BUDGET_LIMIT", detail: `monthly AI budget $${p.max_ai_budget_monthly} reached` };
     if (est.cost !== null && u.ai_cost_today.known !== null && u.ai_cost_today.known + est.cost > p.max_ai_budget_daily) return { code: "BUDGET_LIMIT", detail: `estimated cost $${est.cost.toFixed(2)} would exceed daily AI budget` };
   }
-  if (kind === "PUBLISH" || kind === "UPDATE_PUBLICATION") {
-    const week = u.publications_week + plannedCount("PUBLISH") + plannedCount("UPDATE_PUBLICATION");
+  if (kind === "PUBLISH" || kind === "UPDATE_PUBLICATION" || kind === "AUTO_PUBLISH") {
+    const week = u.publications_week + plannedCount("PUBLISH") + plannedCount("UPDATE_PUBLICATION") + plannedCount("AUTO_PUBLISH");
     if (week >= p.max_publications_per_week) return { code: "BUDGET_LIMIT", detail: `weekly publication limit ${p.max_publications_per_week} reached (${week})` };
   }
   if (kind === "STRATEGY_REFRESH" && u.strategy_week + plannedCount("STRATEGY_REFRESH") >= p.max_strategy_refresh_per_week) return { code: "BUDGET_LIMIT", detail: `strategy refresh limit ${p.max_strategy_refresh_per_week}/week reached` };
@@ -98,7 +123,7 @@ export function budgetCheck(kind, ctx, planned) {
 // Circuit breaker groups: one open circuit pauses every action that depends
 // on the same failing integration (e.g. publisher auth → publish/update/verify).
 export function circuitGroup(actionType) {
-  if (["PUBLISH", "UPDATE_PUBLICATION", "VERIFY_PUBLICATION"].includes(actionType)) return "PUBLISH";
+  if (["PUBLISH", "UPDATE_PUBLICATION", "VERIFY_PUBLICATION", "AUTO_PUBLISH"].includes(actionType)) return "PUBLISH";
   if (["GENERATE_CONTENT", "REQUEST_REVISION", "RECHECK_CONTENT"].includes(actionType)) return "GENERATE_CONTENT";
   return actionType;
 }
@@ -109,7 +134,7 @@ export function gate(actionType, ctx, planned) {
   const p = ctx.policy;
   if (!(p.allowed_actions || []).includes(actionType)) return { code: "POLICY_NOT_ALLOWED", detail: `${actionType} is not in allowed_actions` };
   if (ctx.circuits?.[circuitGroup(actionType)] === "open") return { code: "CIRCUIT_OPEN", detail: `${actionType} paused after repeated failures` };
-  const dep = { CRAWL: "crawler", STRATEGY_REFRESH: "strategy", GENERATE_CONTENT: "content", REQUEST_REVISION: "content", RECHECK_CONTENT: "content", PUBLISH: "publisher", UPDATE_PUBLICATION: "publisher", VERIFY_PUBLICATION: "publisher" }[actionType];
+  const dep = { CRAWL: "crawler", STRATEGY_REFRESH: "strategy", GENERATE_CONTENT: "content", REQUEST_REVISION: "content", RECHECK_CONTENT: "content", PUBLISH: "publisher", AUTO_PUBLISH: "publisher", UPDATE_PUBLICATION: "publisher", VERIFY_PUBLICATION: "publisher" }[actionType];
   if (dep && ctx.health && ctx.health[dep] === false) return { code: "DEPENDENCY_UNHEALTHY", detail: `${dep} worker queue is stalled` };
   return budgetCheck(actionType, ctx, planned);
 }
@@ -173,7 +198,15 @@ export function decide(signals, ctx) {
   for (const s of byType("ARTICLE_NEEDS_REVIEW")) {
     const a = ctx.articles.find((x) => x.id === s.source_record);
     if (!a) continue;
-    if (a.status === "awaiting_approval") {
+    if (a.status === "awaiting_approval" && p.auto_publish_safe) {
+      const why = autoPublishBlockers(a);
+      const envOk = (p.allowed_environments || []).includes(ctx.website.publishing_environment);
+      if (!why.length && envOk && ctx.website.connection_status === "connected") {
+        plan({ signal: s, decision_type: "PUBLISH_APPROVED_ARTICLE", priority: "medium", score: 55, rule: "publish.auto_safe", reason: `Safe auto-publish: QA PASS, score ${qaScoreOf(a)}, fact check passed, no sensitive topics or unverified claims. Policy auto_publish_safe = true.`, evidence: s.evidence }, { action_type: "AUTO_PUBLISH", target_type: "article", target_id: a.id, idempotency_key: `autopublish:${a.id}:v${a.current_version}` });
+        continue;
+      }
+      out.push(decision({ signal: s, decision_type: "REQUEST_HUMAN_REVIEW", priority: a.high_risk ? "high" : "medium", rule: "publish.auto_safe.held", requires_approval: true, risk_level: a.high_risk ? "high" : "low", reason: `Not safe to auto-publish (${[...why, ...(envOk ? [] : ["environment not allowed"]), ...(ctx.website.connection_status === "connected" ? [] : ["website not connected"])].join("; ")}). Waiting for a human.`, evidence: s.evidence }));
+    } else if (a.status === "awaiting_approval") {
       out.push(decision({ signal: s, decision_type: "REQUEST_HUMAN_REVIEW", priority: a.high_risk ? "high" : "medium", rule: "article.awaiting_approval", requires_approval: true, risk_level: a.high_risk ? "high" : "low", reason: "Draft passed the Phase 4 pipeline and awaits human approval. Autopilot never approves content.", evidence: s.evidence }));
     } else if (a.status === "failed") {
       out.push(decision({ signal: s, decision_type: "REQUEST_HUMAN_REVIEW", priority: "medium", rule: "article.failed", requires_approval: true, reason: "The Phase 4 pipeline failed for this article; Autopilot does not add another retry layer. A human decides whether to retry.", evidence: s.evidence, planned_action: { action_type: "NOTIFY_HUMAN", target_type: "article", target_id: a.id, idempotency_key: `notify:failed:${a.id}:v${a.current_version}`, task: { kind: "human_review", title: `Content generation failed: ${a.title || a.primary_keyword}` } } }));
@@ -311,7 +344,7 @@ export function summarize(decisions, ctx) {
     would_refresh_strategy: has("STRATEGY_REFRESH"),
     would_generate_content: gen.length > 0,
     content: gen.map((d) => ({ opportunity: d.signal?.source_record, keyword: d.signal?.evidence?.keyword || d.signal?.evidence?.title || "", reason: d.reason, priority: d.priority, score: d.score })),
-    would_publish: has("PUBLISH") || has("UPDATE_PUBLICATION") ? "yes — an article already has human approval" : "no — human approval required first",
+    would_publish: has("AUTO_PUBLISH") ? "yes — safe auto-publish" : has("PUBLISH") || has("UPDATE_PUBLICATION") ? "yes — an article already has human approval" : "no — human approval required first",
     blocked: decisions.filter((d) => d.block_code).map((d) => ({ decision: d.decision_type, code: d.block_code, reason: d.reason })),
     human_review: decisions.filter((d) => d.decision_type === "REQUEST_HUMAN_REVIEW" || d.decision_type === "INVESTIGATE_TECHNICAL_ISSUE").length,
     analytics: ctx.gsc.state === "has_data" ? "real Search Console data available" : ctx.gsc.state === "no_data" ? "WAIT_FOR_MORE_DATA (Search Console has no rows yet)" : ctx.gsc.state,

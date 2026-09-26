@@ -115,6 +115,7 @@ export function SiteRow({ site, canEdit }: { site: TodaySite; canEdit: boolean }
   const save = useAct(siteSettingsAction);
   const now = useAct(writeNowAction);
   const [daily, setDaily] = useState(site.dailyOn);
+  const [auto, setAuto] = useState(site.autoPublish);
   return (
     <div className="flex flex-wrap items-center gap-3 py-3">
       <div className="min-w-0 flex-1">
@@ -127,10 +128,18 @@ export function SiteRow({ site, canEdit }: { site: TodaySite; canEdit: boolean }
       </div>
       <form action={save.run} className="flex items-center gap-2">
         <input type="hidden" name="websiteId" value={site.id} />
-        <input type="hidden" name="autopublish" value="on" />
+        <input type="hidden" name="autopublish" value={auto ? "on" : "off"} />
         <span className="text-xs text-slate-600">Daily post</span>
         <Toggle name="daily" checked={daily} disabled={!canEdit || save.pending} onChange={setDaily} />
       </form>
+      {daily && (
+        <form action={save.run} className="flex items-center gap-2" title="Publishes by itself only when the post scores 85+, passes the fact check and has no sensitive topics or unverified claims. Anything else waits here for you.">
+          <input type="hidden" name="websiteId" value={site.id} />
+          <input type="hidden" name="daily" value="on" />
+          <span className="text-xs text-slate-600">Auto-publish safe posts</span>
+          <Toggle name="autopublish" checked={auto} disabled={!canEdit || save.pending || !site.connected} onChange={setAuto} />
+        </form>
+      )}
       {daily && canEdit && (
         <form action={now.run}>
           <input type="hidden" name="websiteId" value={site.id} />

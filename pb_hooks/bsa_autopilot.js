@@ -16,7 +16,29 @@
 
 const MODES = ["OFF", "OBSERVE", "SUPERVISED"]; // FULL_AUTO reserved (feature flag, never enabled in Phase 7)
 const SCHEDULES = ["daily", "weekly", "manual_only"];
-const ACTION_TYPES = ["CRAWL", "STRATEGY_REFRESH", "GENERATE_CONTENT", "RECHECK_CONTENT", "REQUEST_REVISION", "PUBLISH", "VERIFY_PUBLICATION", "UPDATE_PUBLICATION", "CREATE_ANALYTICS_OPPORTUNITY", "NOTIFY_HUMAN", "WAIT"];
+const ACTION_TYPES = ["CRAWL", "STRATEGY_REFRESH", "GENERATE_CONTENT", "RECHECK_CONTENT", "REQUEST_REVISION", "PUBLISH", "VERIFY_PUBLICATION", "UPDATE_PUBLICATION", "AUTO_PUBLISH", "CREATE_ANALYTICS_OPPORTUNITY", "NOTIFY_HUMAN", "WAIT"];
+
+// Safe auto-publish rule (must match autopilot-worker/src/decide.js). Re-checked
+// here at execution time, fail-closed.
+const AUTO_PUBLISH_MIN_SCORE = 85;
+const HARMLESS_FLAGS = ["RESEARCH_LIMITED", "META_DESCRIPTION_LENGTH", "SEO_TITLE_LENGTH", "SEO_TITLE_KEYWORD", "SLUG_FORMAT", "MINOR_ADVISORY", "NOT_REQUIRED", "NOT_APPLICABLE"];
+function autoPublishBlockers(a) {
+  const b = [];
+  if (a.status !== "awaiting_approval") b.push("status " + a.status);
+  if (a.qa_status !== "PASS") b.push("QA " + (a.qa_status || "pending"));
+  const r = a.qa_score;
+  const sc = typeof r === "number" ? r : (r && typeof r === "object" && typeof r.score === "number" ? r.score : null);
+  if (sc === null || Math.round(sc) < AUTO_PUBLISH_MIN_SCORE) b.push("score " + sc + " < " + AUTO_PUBLISH_MIN_SCORE);
+  if (a.fact_check_status !== "passed") b.push("fact check " + (a.fact_check_status || "pending"));
+  if (a.high_risk) b.push("sensitive topic");
+  if (Array.isArray(a.risk_categories) && a.risk_categories.length) b.push("risk categories");
+  const flags = Array.isArray(a.flags) ? a.flags : [];
+  for (const f of flags) {
+    const code = typeof f === "string" ? f : (f && (f.code || f.type)) || JSON.stringify(f);
+    if (HARMLESS_FLAGS.indexOf(code) === -1) b.push("flag " + code);
+  }
+  return b;
+}
 const ENVIRONMENTS = ["staging", "production"];
 const HOT_RUN = ["queued", "collecting_signals", "evaluating", "planning", "executing"];
 const PARKED_RUN = ["waiting_for_approval", "monitoring"];
@@ -57,6 +79,7 @@ const DEFAULT_POLICY = {
   // Simple mode: Autopilot picks the next best Phase 3 topic itself (topic
   // selection only — the generated ARTICLE still needs human approval).
   auto_pick_opportunities: false,
+  auto_publish_safe: false,
 };
 const LIMIT_BOUNDS = {
   max_actions_per_day: [0, 50], max_content_jobs_per_day: [0, 5], max_content_jobs_per_week: [0, 20], max_publications_per_week: [0, 20],
@@ -194,6 +217,7 @@ function validatePolicyInput(body, current) {
   }
   if (body.publishAfterHumanApproval !== undefined) out.publish_after_human_approval = body.publishAfterHumanApproval === true;
   if (body.autoPickOpportunities !== undefined) out.auto_pick_opportunities = body.autoPickOpportunities === true;
+  if (body.autoPublishSafe !== undefined) out.auto_publish_safe = body.autoPublishSafe === true;
   // Phase 7 invariants: human publish approval and pause guards cannot be disabled.
   if (body.requireHumanPublishApproval === false) L.fail(400, "INVALID", "Human publish approval cannot be disabled in Phase 7.");
   if (body.pauseOnHighRisk === false) L.fail(400, "INVALID", "High-risk content always stops Autopilot in Phase 7.");
@@ -654,6 +678,26 @@ function internalExecute(body) {
     // Phase 5 entry point: approval lock, hash, idempotency, slug conflicts.
     const r = P.requestPublish(actor, { articleId: a.id, confirm: true, operation: pv.operation });
     return { job_type: "publish_job", job_id: r.id, operation: r.operation, created: r.created, approved_version: a.approved_version, approved_hash: a.approved_hash, approved_by: a.approved_by, environment: website.publishing_environment };
+  }
+  if (type === "AUTO_PUBLISH") {
+    // Simple mode. The approval is recorded under the admin who switched on
+    // auto-publish (the acting user) and is marked as a policy approval.
+    if (!policy.auto_publish_safe || !snap.auto_publish_safe) L.fail(409, "POLICY", "Safe auto-publish is off.");
+    const a = L.getOne("articles", target);
+    if (!a || a.website !== website.id) L.fail(404, "NOT_FOUND", "Article not found.");
+    const managed = L.findFirst("autopilot_actions", "website = {:w} && article = {:a} && action_type = 'GENERATE_CONTENT'", "", { w: website.id, a: a.id });
+    if (!managed) L.fail(409, "NOT_MANAGED", "Only posts written by Autopilot can be auto-published.");
+    const why = autoPublishBlockers(a);
+    if (why.length) L.fail(409, "NOT_SAFE", "Not safe to auto-publish: " + why.join("; "));
+    if ((policy.allowed_environments || []).indexOf(website.publishing_environment) === -1) L.fail(409, "ENVIRONMENT_NOT_ALLOWED", "Publishing environment " + website.publishing_environment + " is not allowed.");
+    const approved = L.approveArticle(actor, { articleId: a.id });
+    const prov = Object.assign({}, approved.provenance || a.provenance || {}, { auto_published_by_policy: true, auto_publish_policy_version: policy.version, auto_publish_action: action.id });
+    L.updateRec("articles", a.id, { provenance: prov });
+    L.logActivity($app, { organization: website.organization, client: website.client, website: website.id, user: actor.id, action: "ARTICLE_AUTO_APPROVED", entity_type: "article", entity_id: a.id, metadata: { via: "autopilot", rule: "auto_publish_safe", policy_version: policy.version, autopilot_action: action.id } });
+    const pv = P.preview(actor, { articleId: a.id });
+    if (pv.blockers && pv.blockers.length) L.fail(409, pv.slug_conflict ? "SLUG_CONFLICT" : "NOT_PUBLISHABLE", pv.blockers.join(" "));
+    const r = P.requestPublish(actor, { articleId: a.id, confirm: true, operation: pv.operation });
+    return { job_type: "publish_job", job_id: r.id, operation: r.operation, created: r.created, auto: true, environment: website.publishing_environment };
   }
   if (type === "VERIFY_PUBLICATION") {
     const r = P.requestVerify(actor, { articleId: target });

@@ -5,6 +5,8 @@
 import PocketBase from "pocketbase";
 import { hostname } from "node:os";
 import { Engine, WORKER_VERSION } from "./src/engine.js";
+import { telegramFromEnv } from "./src/telegram.js";
+import { falFromEnv } from "./src/images.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -16,11 +18,13 @@ export async function runWorker({ env = process.env, logger = console } = {}) {
   const interval = Math.max(1000, Number.parseInt(env.POLL_INTERVAL_MS || "15000", 10));
   const oneShot = env.ONE_SHOT === "1";
   const workerId = `${hostname()}-${process.pid}`;
-  const engine = new Engine(pb, { logger, workerId });
+  const telegram = telegramFromEnv(env, { logger });
+  const images = falFromEnv(env, { logger });
+  const engine = new Engine(pb, { logger, workerId, telegram, images, appUrl: env.APP_URL || "" });
   let stopping = false;
   process.once("SIGINT", () => { stopping = true; });
   process.once("SIGTERM", () => { stopping = true; });
-  logger.log(`[autopilot] ${WORKER_VERSION} authenticated; poll=${interval}ms id=${workerId}`);
+  logger.log(`[autopilot] ${WORKER_VERSION} authenticated; poll=${interval}ms id=${workerId} telegram=${telegram ? "on" : "off"} images=${images ? "on" : "off"}`);
   let lastAuth = Date.now();
   let lastBeat = 0;
   do {

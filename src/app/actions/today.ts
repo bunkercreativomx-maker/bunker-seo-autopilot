@@ -69,7 +69,7 @@ export async function siteSettingsAction(_p: TodayState, f: FormData): Promise<T
     await saveSimpleSettings(pb, websiteId, dailyOn, autoPublish);
     done();
     revalidatePath(`/websites/${websiteId}`);
-    return { ok: dailyOn ? "Saved — a new post every morning." : "Saved — daily posts are off." };
+    return { ok: !dailyOn ? "Saved — daily posts are off." : autoPublish ? "Saved — safe posts publish by themselves; the rest wait here." : "Saved — a new post every morning, waiting for your OK." };
   } catch (e) { return { error: msg(e) }; }
 }
 

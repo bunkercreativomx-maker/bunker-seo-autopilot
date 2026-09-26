@@ -1292,7 +1292,7 @@ async function main() {
   // (user-scoped /api/bsa/autopilot/* endpoints) or the bunker-seo-autopilot
   // worker (superuser). Users read their own organization's rows.
   const AP_MODES = ["OFF", "OBSERVE", "SUPERVISED", "FULL_AUTO"]; // FULL_AUTO reserved, rejected by hooks (Phase 7)
-  const AP_ACTIONS = ["CRAWL", "STRATEGY_REFRESH", "GENERATE_CONTENT", "RECHECK_CONTENT", "REQUEST_REVISION", "PUBLISH", "VERIFY_PUBLICATION", "UPDATE_PUBLICATION", "CREATE_ANALYTICS_OPPORTUNITY", "NOTIFY_HUMAN", "WAIT"];
+  const AP_ACTIONS = ["CRAWL", "STRATEGY_REFRESH", "GENERATE_CONTENT", "RECHECK_CONTENT", "REQUEST_REVISION", "PUBLISH", "VERIFY_PUBLICATION", "UPDATE_PUBLICATION", "AUTO_PUBLISH", "CREATE_ANALYTICS_OPPORTUNITY", "NOTIFY_HUMAN", "WAIT"];
   const AP_RUN_STATUS = ["queued", "collecting_signals", "evaluating", "planning", "executing", "waiting_for_approval", "monitoring", "paused", "completed", "completed_with_warnings", "failed", "cancelled"];
   const AP_TRIGGERS = ["scheduled", "manual", "dry_run", "crawl_completed", "strategy_completed", "gsc_sync_completed", "article_approved", "article_ready", "article_rejected", "content_job_finished", "publication_completed", "publication_failed", "content_recheck_completed", "analytics_opportunity_created", "follow_up"];
   const AP_SIGNALS = ["TECHNICAL_ISSUE", "CONTENT_GAP", "NEW_CONTENT_OPPORTUNITY", "STRIKING_DISTANCE", "LOW_CTR", "CONTENT_DECAY", "NEW_QUERY", "PAGE_QUERY_MISMATCH", "POTENTIAL_CANNIBALIZATION", "GROWING_PAGE", "GROWING_QUERY", "PUBLICATION_FAILED", "GSC_CONNECTION_LOST", "STALE_CRAWL", "STALE_STRATEGY", "ARTICLE_NEEDS_REVIEW", "ARTICLE_APPROVED", "PUBLICATION_UNVERIFIED"];
@@ -1325,6 +1325,7 @@ async function main() {
     { name: "require_human_publish_approval", type: "bool" },
     { name: "publish_after_human_approval", type: "bool" },
     { name: "auto_pick_opportunities", type: "bool" },
+    { name: "auto_publish_safe", type: "bool" },
     { name: "publish_after_approval_since", type: "date", required: false },
     { name: "pause_on_high_risk", type: "bool" },
     { name: "pause_on_fact_failure", type: "bool" },
@@ -1546,6 +1547,9 @@ async function main() {
     indexes: ["CREATE UNIQUE INDEX idx_autopilot_tasks_dedup ON autopilot_tasks (website, dedup_key)", "CREATE INDEX idx_autopilot_tasks_status ON autopilot_tasks (organization, status)"],
   });
 
+  // Simple mode: safe auto-publish action (idempotent for existing installs).
+  await ensureSelectValues("autopilot_actions", "action_type", AP_ACTIONS);
+
   // Circuit breaker per website + action type.
   await ensureCollection("autopilot_circuits", [
     ...tenantFields(),
@@ -1559,6 +1563,7 @@ async function main() {
     ...timestamps(),
     ...autodates(),
   ], ADMIN_READ_RULES, { bareName: "autopilot_circuits", indexes: ["CREATE UNIQUE INDEX idx_autopilot_circuits_key ON autopilot_circuits (website, action_type)"] });
+  await ensureSelectValues("autopilot_circuits", "action_type", AP_ACTIONS);
 
   // Feedback history: action -> publication version -> observation windows.
   // Observations are REAL Search Console aggregates only (or no_data); they

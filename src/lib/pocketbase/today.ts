@@ -85,7 +85,7 @@ export async function loadToday(pb: PocketBase) {
     const on = Boolean(p?.enabled) && s(p?.mode) === "SUPERVISED" && s(p?.schedule) === "daily";
     return {
       id: w.id, name: s(w.name) || s(w.domain), domain: s(w.domain),
-      dailyOn: on, autoPublish: Boolean(p?.publish_after_human_approval), paused: Boolean(p?.paused),
+      dailyOn: on, autoPublish: Boolean(p?.auto_publish_safe), paused: Boolean(p?.paused),
       connected: s(w.connection_status) === "connected" && Boolean(w.publishing_enabled),
       environment: s(w.publishing_environment), nextRunAt: s(p?.next_run_at),
     };
@@ -107,8 +107,13 @@ export async function saveSimpleSettings(pb: PocketBase, websiteId: string, dail
     mode: dailyOn ? "SUPERVISED" : "OFF",
     schedule: "daily",
     autoPickOpportunities: true,
-    publishAfterHumanApproval: autoPublish,
-    allowedActions: ["CRAWL", "STRATEGY_REFRESH", "GENERATE_CONTENT", "RECHECK_CONTENT", "REQUEST_REVISION", "PUBLISH", "VERIFY_PUBLICATION", "UPDATE_PUBLICATION", "NOTIFY_HUMAN", "WAIT"],
+    // "Auto-publish" = safe auto-publish: only posts that pass every check
+    // (score >= 85, QA PASS, fact check passed, no sensitive topic, no
+    // unverified claims). Anything else waits in Today. Approving a post by
+    // hand still publishes it right away.
+    autoPublishSafe: autoPublish,
+    publishAfterHumanApproval: true,
+    allowedActions: ["CRAWL", "STRATEGY_REFRESH", "GENERATE_CONTENT", "RECHECK_CONTENT", "REQUEST_REVISION", "PUBLISH", "VERIFY_PUBLICATION", "UPDATE_PUBLICATION", "AUTO_PUBLISH", "NOTIFY_HUMAN", "WAIT"],
     // Sensible fixed defaults: 1 post/day, max 7/week, 1 auto-fix per post.
     maxContentJobsPerDay: 1, maxContentJobsPerWeek: 7, maxPublicationsPerWeek: 7, maxRevisionJobsPerArticle: 1,
     maxActionsPerDay: 10, maxCrawlsPerWeek: 1, maxStrategyRefreshPerWeek: 1,

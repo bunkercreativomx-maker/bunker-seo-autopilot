@@ -94,11 +94,17 @@ const BODY_GYM = [
   "La instalación se coordina en horarios de menor afluencia para que los socios puedan seguir entrenando. Al terminar se explica al encargado cómo leer la producción en la pantalla del inversor.",
   "El polvo y la lluvia ensucian los módulos con el tiempo. Una limpieza programada y una revisión anual de conexiones mantienen el sistema produciendo de forma estable.",
 ];
+const BODY_HOTEL = [
+  "Un hotel consume energía todo el día: lavandería, calentadores de agua, elevadores y climatización de habitaciones. Revisar el recibo de varios meses ayuda a ver en qué temporada sube más el gasto.",
+  "Las azoteas de los hoteles suelen tener tinacos, antenas y equipos de clima. La visita técnica ubica las áreas libres de sombra y define por dónde bajará el cableado hacia el cuarto eléctrico.",
+  "El trabajo se programa para no molestar a los huéspedes, evitando ruido en horarios de descanso. Al final se capacita al personal de mantenimiento para revisar la producción diaria.",
+  "Con el tiempo el polvo reduce la producción de los módulos. Una rutina de limpieza y una inspección anual de conexiones mantienen el sistema trabajando de forma pareja.",
+];
 function draft(ev, note = "") {
   const phone = ev.verified_facts?.find((f) => f.type === "phone")?.value || "";
   const kw = String(ev.meta?.primary_keyword || "");
-  const B = /gimnas/.test(kw) ? BODY_GYM : /restaurant/.test(kw) ? BODY_REST : BODY;
-  const h1 = /gimnas/.test(kw) ? "Paneles solares para gimnasios: qué revisar" : /restaurant/.test(kw) ? "Paneles solares para restaurantes: lo que hay que revisar" : "Paneles solares para comercios: cómo empezar";
+  const B = /hotel/.test(kw) ? BODY_HOTEL : /gimnas/.test(kw) ? BODY_GYM : /restaurant/.test(kw) ? BODY_REST : BODY;
+  const h1 = /hotel/.test(kw) ? "Paneles solares para hoteles: qué revisar" : /gimnas/.test(kw) ? "Paneles solares para gimnasios: qué revisar" : /restaurant/.test(kw) ? "Paneles solares para restaurantes: lo que hay que revisar" : "Paneles solares para comercios: cómo empezar";
   return [`# ${h1}`, "", B[0], "", "## Qué revisar antes de instalar", "", B[1], "", "## Cómo es el proceso", "", B[2], "", "## Mantenimiento", "", B[3] + (note ? ` ${note}` : ""), "", "## Contacto", "", `Para una visita técnica llama al ${phone}.`].join("\n");
 }
 function makeProvider() {
@@ -740,4 +746,59 @@ test("P7 simple mode: daily post auto-picks a PROPOSED topic, writes it, still w
   const again = await runAndProcess("admin", w3);
   assert.equal(await count("autopilot_actions", `run = "${again.id}" && action_type = "GENERATE_CONTENT" && status = "running"`), 0);
   await ap("admin", "policy/save", { websiteId: w3, enabled: false });
+});
+
+// ================================================================= SAFE AUTO-PUBLISH
+test("P7 simple mode: safe auto-publish publishes a clean post by itself; a flagged post waits", async () => {
+  const w4 = (await mkWebsite(ids.orgA, ids.cA, "autopub")).id;
+  const T = { organization: ids.orgA, client: ids.cA, website: w4 };
+  await admin.collection("business_facts").create({ ...T, fact_type: "phone", label: "Teléfono", value: "656 695 3960", source: "user", verified: true, verification_state: "verified", provenance: "user_provided", created_at: NOW() });
+  await call("admin", "publishing/config", { websiteId: w4, publisherType: "pocketbase_cms", publishingMode: "manual", environment: "staging", enabled: true, allowedDomains: ["127.0.0.1"], baseUrl: `${SITE}/cms/${w4}`, blogPath: "/blog", revalidateUrl: `${SITE}/cms/${w4}/revalidate`, sitemapUrl: `${SITE}/cms/${w4}/sitemap.xml`, verifySitemap: true });
+  site.secrets[w4] = (await call("admin", "publishing/secret", { websiteId: w4, generate: true })).secret;
+  await call("admin", "publishing/test", { websiteId: w4 });
+  await runPublisher(1);
+  const s = await strategyFixture(T);
+  const pGood = await s.opp("paneles solares para hoteles y moteles", { status: "proposed" });
+  // Editor cannot switch on auto-publish.
+  await rejects(ap("editor", "policy/save", { websiteId: w4, autoPublishSafe: true }), "FORBIDDEN");
+  await ap("admin", "policy/save", { websiteId: w4, mode: "SUPERVISED", enabled: true, schedule: "daily", autoPickOpportunities: true, publishAfterHumanApproval: true, autoPublishSafe: true,
+    allowedActions: ["CRAWL", "STRATEGY_REFRESH", "GENERATE_CONTENT", "RECHECK_CONTENT", "REQUEST_REVISION", "PUBLISH", "VERIFY_PUBLICATION", "UPDATE_PUBLICATION", "AUTO_PUBLISH", "NOTIFY_HUMAN", "WAIT"],
+    maxContentJobsPerDay: 1, maxContentJobsPerWeek: 7, maxPublicationsPerWeek: 7 });
+  let run = await runAndProcess("admin", w4);
+  const gen = await list("autopilot_actions", `run = "${run.id}" && action_type = "GENERATE_CONTENT"`);
+  assert.equal(gen.length, 1);
+  assert.equal(gen[0].target_id, pGood);
+  await runContentJobs(gen[0].article);
+  let art = await admin.collection("articles").getOne(gen[0].article);
+  assert.equal(art.status, "awaiting_approval", `qa=${art.qa_status} fc=${art.fact_check_status} flags=${JSON.stringify(art.flags)} sum=${JSON.stringify(art.qa_summary).slice(0,400)}`);
+  // Fixture QA score is 84 (< 85) → held for a human even with the switch on.
+  run = await runAndProcess("admin", w4);
+  assert.equal(await count("autopilot_actions", `website = "${w4}" && action_type = "AUTO_PUBLISH"`), 0, "score 84 is below the safe threshold");
+  const held = await list("autopilot_decisions", `website = "${w4}" && rule = "publish.auto_safe.held"`);
+  assert.ok(held.length >= 1 && /score 84/.test(held[0].reason), held[0]?.reason);
+  // Unsafe server-side even if a worker tried: the hook re-checks.
+  // Make it clean (as QA would with a higher score) → auto-publishes.
+  await admin.collection("articles").update(art.id, { qa_score: { score: 93 }, qa_status: "PASS", fact_check_status: "passed", flags: ["RESEARCH_LIMITED"], high_risk: false });
+  run = await runAndProcess("admin", w4);
+  const auto = await list("autopilot_actions", `website = "${w4}" && action_type = "AUTO_PUBLISH"`);
+  assert.equal(auto.length, 1, JSON.stringify((await list("autopilot_decisions", `run = "${run.id}"`)).map((d) => [d.rule, d.reason])).slice(0, 1500));
+  await runPublisher(5);
+  run = await runAndProcess("admin", w4);
+  art = await admin.collection("articles").getOne(art.id);
+  assert.ok(["published", "approved", "publishing", "publish_queued"].includes(art.status), art.status);
+  assert.equal(art.provenance.auto_published_by_policy, true, "provenance marks the policy approval");
+  assert.ok(art.approved_by, "approval recorded under the admin who enabled auto-publish");
+  assert.equal(await count("activity_logs", `website = "${w4}" && action = "ARTICLE_AUTO_APPROVED"`), 1, "audited");
+  const pubs = await pbPublic(w4);
+  assert.equal(pubs.length, 1, "visible on the website");
+  // Public hub profile exposes only safe, verified branding.
+  const profRes = await fetch(`${PB_URL}/api/bsa/public/site/${w4}`);
+  const prof = await profRes.json();
+  assert.equal(profRes.status, 200, JSON.stringify(prof) + JSON.stringify(await admin.collection("websites").getOne(w4, { fields: "publishing_enabled,publisher_type,base_url" })));
+  assert.equal(prof.phone, "656 695 3960");
+  assert.equal(prof.environment, "staging");
+  assert.ok(!("organization" in prof) && !("client" in prof) && !JSON.stringify(prof).includes("secret"));
+  assert.equal((await fetch(`${PB_URL}/api/bsa/public/site/${ids.w2}`)).status, 404, "unconnected website has no public profile");
+  // Turning the switch off stops auto-publish.
+  await ap("admin", "policy/save", { websiteId: w4, autoPublishSafe: false, enabled: false });
 });
