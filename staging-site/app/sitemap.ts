@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 
 // Only published + verified content (the public API never returns anything else).
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  if (!process.env.BUNKER_WEBSITE_ID) return []; // hub-only: each client's sitemap lives at /s/<id>/blog/sitemap.xml
   const cfg = bunkerConfig();
   const posts = await listPublished(1000);
   return [

@@ -25,7 +25,8 @@ const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const q = (v: string) => v.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
 function pbUrl() {
-  const u = (process.env.BUNKER_POCKETBASE_URL || "").replace(/\/+$/, "");
+  // Production hub default: the public Bunker Rank content API (published-only rules).
+  const u = (process.env.BUNKER_POCKETBASE_URL || "https://seo-pb.bunkeragent.cloud").replace(/\/+$/, "");
   if (!u) throw new Error("BUNKER_POCKETBASE_URL is missing");
   return u;
 }
@@ -65,3 +66,6 @@ export const publicUrl = (s: SiteProfile, slug = "") => `${s.site_url}${s.blog_p
 
 /** Only staging websites (or a hub-wide staging flag) are kept out of search. */
 export const isNoindex = (s: SiteProfile) => s.environment !== "production" || process.env.BUNKER_STAGING_NOINDEX === "1";
+
+/** Hub-only deployment (e.g. blog.bunkerank.com): no single-site website id configured. */
+export const isHubOnly = () => !process.env.BUNKER_WEBSITE_ID;

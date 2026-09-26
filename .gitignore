@@ -48,3 +48,4 @@ staging-site/.next/
 staging-site/.data/
 analytics-worker/node_modules/
 autopilot-worker/node_modules/
+strategy-worker/node_modules/
