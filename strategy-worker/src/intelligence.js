@@ -85,8 +85,11 @@ export async function discoverKeywordCandidates(input, { provider, config, limit
       for (const candidate of value.keywords) {
         if (!candidate || typeof candidate.keyword !== "string" || candidate.keyword.length < 3 || candidate.keyword.length > 120) return "invalid keyword";
         if (!Array.isArray(candidate.source_ids) || !candidate.source_ids.length || candidate.source_ids.length > 5) return "invalid source_ids";
-        if (candidate.source_ids.some((id) => !known.has(id))) return "candidate references unknown evidence";
       }
+      // One hallucinated source id must not fail the whole strategy: unknown ids
+      // are dropped below (candidates with no known backing are skipped). Only
+      // reject when NOTHING the model returned is backed by real evidence.
+      if (value.keywords.length && !value.keywords.some((c) => c.source_ids.some((id) => known.has(id)))) return "candidate references unknown evidence";
       return true;
     },
   });
@@ -97,6 +100,7 @@ export async function discoverKeywordCandidates(input, { provider, config, limit
     const normalized = normalizeKeyword(candidate.keyword);
     if (!normalized || seen.has(normalized)) continue;
     const backing = [...new Set(candidate.source_ids)].map((id) => known.get(id)).filter(Boolean);
+    if (!backing.length) continue;
     const sourceText = backing.flatMap((item) => splitBusinessValues(item.value)).join(" ");
     if (overlapScore(normalized, sourceText) <= 0) continue;
     seen.add(normalized);
