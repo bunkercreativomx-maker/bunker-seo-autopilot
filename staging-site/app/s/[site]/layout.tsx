@@ -3,6 +3,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getSite } from "@/lib/bunker-content/hub";
 import { t } from "@/lib/bunker-content/i18n";
+import { themeFor } from "@/lib/bunker-content/themes";
+import { BrandedShell } from "@/lib/bunker-content/branded";
 
 // Branded shell for one client's blog. Links point to the client's real
 // domain (absolute), so it works both through the Vercel rewrite and when the
@@ -19,6 +21,8 @@ export default async function SiteLayout({ children, params }: { children: React
   const s = await getSite(site);
   if (!s) notFound();
   const L = t(s.language);
+  const th = themeFor(site);
+  if (th) return <BrandedShell th={th} s={s} staging={s.environment !== "production" ? L.staging : undefined}>{children}</BrandedShell>;
   const tel = s.phone.replace(/[^\d+]/g, "");
   return (
     <div className="hub" lang={s.language?.startsWith("en") ? "en" : "es"}>

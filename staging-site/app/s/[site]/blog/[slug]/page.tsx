@@ -27,7 +27,7 @@ export default async function HubArticle({ params }: Props) {
   const loc = s.language?.startsWith("en") ? "en-US" : "es-MX";
   const tel = s.phone.replace(/[^\d+]/g, "");
   return (
-    <article className="hub-article">
+    <article className="hub-article bh-article">
       {ld ? <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: ld }} /> : null}
       <a className="hub-back" href={publicUrl(s)}>← Blog</a>
       <h1>{a.title}</h1>
