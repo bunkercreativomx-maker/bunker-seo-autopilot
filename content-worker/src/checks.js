@@ -25,11 +25,21 @@ const NOT_VERBS = new Set(["ramos", "tramos", "gramos", "kilogramos", "mismos", 
 /** Deterministic business-claim test; the model cannot declassify a claim. */
 export function isBusinessClaim(claim, { brandTerms = [] } = {}) {
   if (!claim) return false;
-  if (claim.business_specific || claim.claim_type === "business") return true;
   const text = normalizeForMatch(claim.claim);
   if (FIRST_PERSON.test(text)) return true;
   for (const m of text.matchAll(FIRST_PERSON_VERB)) if (!NOT_VERBS.has(m[0])) return true;
-  return brandTerms.some((t) => t && t.length > 3 && text.includes(normalizeForMatch(t)));
+  if (brandTerms.some((t) => t && t.length > 3 && text.includes(normalizeForMatch(t)))) return true;
+  // The AI label alone is not enough: impersonal, educational sentences
+  // ("a quote usually includes…", "installation involves mounting…") are
+  // general knowledge, not facts about THIS business — unless they mention a
+  // business topic (warranty, financing, price, certification, track record…).
+  if (claim.business_specific || claim.claim_type === "business") {
+    const raw = String(claim.claim || "");
+    const concrete = /\d[\d\s.-]{6,}\d|@|https?:\/\/|www\./i.test(raw);
+    const volatile = ["contact", "price", "availability", "promotion", "warranty", "certification", "financing", "credential", "guarantee", "statistic"].includes(claim.sensitive_topic || "none");
+    return concrete || volatile || topicsIn(raw).length > 0;
+  }
+  return false;
 }
 
 // Topic vocabulary for business information that must be backed by a

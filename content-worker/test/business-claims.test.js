@@ -118,3 +118,12 @@ test("navigation / anchor / button / breadcrumb / UI heading text is not extract
     "Los paneles generan corriente continua.",
   ]) assert.equal(isNonClaimText(text, md), false, text);
 });
+
+test("impersonal educational sentences are not business claims just because the AI labelled them", () => {
+  const generic = enforceClaim({ claim: "Una cotización típica suele incluir el dimensionamiento estimado del sistema.", claim_type: "business", business_specific: true, sensitive_topic: "none" }, { verification_status: "UNVERIFIED", evidence_ids: [] }, idx, { brandTerms });
+  assert.notEqual(generic.risk_level, "high");
+  const warranty = enforceClaim({ claim: "La instalación incluye garantía de por vida.", claim_type: "business", business_specific: true, sensitive_topic: "warranty" }, { verification_status: "UNVERIFIED", evidence_ids: [] }, idx, { brandTerms });
+  assert.equal(warranty.risk_level, "high");
+  const firstPerson = enforceClaim({ claim: "Instalamos en menos de una semana.", claim_type: "other", sensitive_topic: "none" }, { verification_status: "UNVERIFIED", evidence_ids: [] }, idx, { brandTerms });
+  assert.equal(firstPerson.risk_level, "high");
+});
