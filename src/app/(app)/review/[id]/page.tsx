@@ -23,7 +23,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
   const issues = claims
     .filter((c) => Number(c.version) === version && ["UNVERIFIED", "CONTRADICTED"].includes(c.verification_status) && c.risk_level !== "low")
     .map((c) => ({ text: c.claim, status: c.verification_status }))
-    .slice(0, 8);
+    .slice(0, 25);
   const raw = a.qa_score as unknown;
   const score = typeof raw === "number" ? Math.round(raw) : raw && typeof raw === "object" && typeof (raw as { score?: unknown }).score === "number" ? Math.round((raw as { score: number }).score) : null;
 

@@ -102,7 +102,15 @@ export function enforceClaim(claim, proposal, evidence, { brandTerms = [] } = {}
     // Business claims: ONLY a verified business fact that specifically matches
     // the claim can back it. Client website (C*), client declarations and
     // unverified facts (U*) and external sources never verify the business.
-    const matching = known.filter((id) => evidence.get(id).category === "verified_fact" && factSupportsClaim(claim.claim, evidence.get(id).item));
+    let matching = known.filter((id) => evidence.get(id).category === "verified_fact" && factSupportsClaim(claim.claim, evidence.get(id).item));
+    // The model often forgets to cite the fact. Contact details (phone / email /
+    // WhatsApp) are checked deterministically against EVERY verified fact.
+    if (!matching.length) {
+      for (const [id, ev] of evidence) {
+        if (ev.category === "verified_fact" && ["phone", "whatsapp", "email"].includes(ev.item?.type) && factSupportsClaim(claim.claim, ev.item)) { matching = [id]; break; }
+      }
+      if (matching.length && !known.includes(matching[0])) known.push(matching[0]);
+    }
     if (matching.length) {
       status = "VERIFIED";
       risk = "low";

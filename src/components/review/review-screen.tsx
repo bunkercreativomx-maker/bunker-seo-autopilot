@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Markdown } from "@/components/content/markdown";
 import { cn } from "@/lib/utils";
 import type { ReviewState } from "@/app/actions/review";
-import { approvePublishAction, discardReviewAction, newImageAction, retryReviewAction, reviewRewriteAction, saveReviewAction } from "@/app/actions/review";
+import { approvePublishAction, autoFixAction, discardReviewAction, newImageAction, retryReviewAction, reviewRewriteAction, saveReviewAction } from "@/app/actions/review";
 
 export type ReviewPost = {
   id: string; websiteId: string; websiteName: string; domain: string; status: string;
@@ -46,16 +46,17 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
   const pub = useAct(approvePublishAction);
   const dis = useAct(discardReviewAction);
   const retry = useAct(retryReviewAction);
+  const fix = useAct(autoFixAction);
 
   const working = Boolean(post.jobStep);
   const waitingImage = !post.image && REVIEWABLE.includes(post.status) && Boolean(post.content);
   const publishing = ["publish_queued", "publishing"].includes(post.status);
   // Keep the page fresh while something is happening in the background.
   useEffect(() => {
-    if (!(working || waitingImage || publishing || retry.state?.ok || img.state?.ok || rew.state?.ok || save.state?.ok || pub.state?.ok)) return;
+    if (!(working || waitingImage || publishing || fix.state?.ok || retry.state?.ok || img.state?.ok || rew.state?.ok || save.state?.ok || pub.state?.ok)) return;
     const t = setInterval(() => router.refresh(), 6000);
     return () => clearInterval(t);
-  }, [working, waitingImage, publishing, retry.state, img.state, rew.state, save.state, pub.state, router]);
+  }, [working, waitingImage, publishing, fix.state, retry.state, img.state, rew.state, save.state, pub.state, router]);
 
   const hidden = <><input type="hidden" name="articleId" value={post.id} /><input type="hidden" name="websiteId" value={post.websiteId} /><input type="hidden" name="status" value={post.status} /></>;
   const reviewable = REVIEWABLE.includes(post.status) && canEdit;
@@ -63,7 +64,18 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
   const blocked = post.qaStatus === "BLOCKED" || post.factStatus === "blocked";
   const needsTick = post.highRisk || post.qaStatus === "NEEDS_REVISION" || Boolean(pub.state?.needsReview);
   const canPublish = canEdit && !working && !editing && !blocked && !checksPending && ["awaiting_approval", "approved", "publish_failed"].includes(post.status) && Boolean(post.image);
-  const busy = save.pending || img.pending || rew.pending || pub.pending || dis.pending || retry.pending;
+  const busy = save.pending || img.pending || rew.pending || pub.pending || dis.pending || retry.pending || fix.pending;
+  // Plain-words reason whenever Publish can't be pressed.
+  let why = "";
+  if (!canPublish && !LIVE.includes(post.status) && post.status !== "rejected") {
+    if (working) why = "Wait — it’s still working on this post.";
+    else if (post.failed) why = "The writer got stuck. Press “Try again” above.";
+    else if (blocked) why = "Blocked: some sentences couldn’t be verified. Press “Fix it for me”.";
+    else if (checksPending) why = "Checking the latest changes (1–2 min)…";
+    else if (!post.image) why = "Waiting for the featured image (about 1 min)…";
+    else if (editing) why = "Save or close the editor first.";
+    else if (post.status === "needs_revision") why = "Being revised.";
+  }
 
   // ---- status line (plain words)
   let status: { tone: "green" | "amber" | "red" | "blue" | "slate"; text: string };
@@ -103,8 +115,18 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
 
       {post.issues.length > 0 && !working && (
         <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-900">
-          <p className="font-medium">Double-check these sentences:</p>
-          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[13px]">{post.issues.map((i, k) => <li key={k}>{i.text}</li>)}</ul>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="font-medium">{blocked ? `${post.issues.length} sentence${post.issues.length === 1 ? "" : "s"} couldn’t be verified — this blocks publishing.` : "Double-check these sentences:"}</p>
+            {blocked && canEdit && (
+              <form action={fix.run} className="ml-auto">
+                {hidden}
+                {post.issues.map((i, k) => <input key={k} type="hidden" name="flagged" value={i.text} />)}
+                <button disabled={busy} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50">{fix.pending ? "…" : "✨ Fix it for me"}</button>
+              </form>
+            )}
+          </div>
+          <Note state={fix.state} />
+          <ul className="mt-2 list-disc space-y-0.5 pl-5 text-[13px]">{post.issues.map((i, k) => <li key={k}>{i.text}</li>)}</ul>
         </div>
       )}
 
@@ -213,6 +235,7 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
                 </>
               )}
             </form>
+            {why && !pub.state?.error && <p className="text-xs font-medium text-amber-700">{why}</p>}
             <Note state={pub.state} /><Note state={rew.state} /><Note state={dis.state} />
           </div>
         </div>

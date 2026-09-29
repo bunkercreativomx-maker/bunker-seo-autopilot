@@ -112,3 +112,22 @@ export async function retryReviewAction(_p: ReviewState, f: FormData): Promise<R
     return { ok: "Trying again… this page updates by itself." };
   } catch (e) { return { error: msg(e) }; }
 }
+
+/** One click: rewrite only the sentences the checker couldn't verify. */
+export async function autoFixAction(_p: ReviewState, f: FormData): Promise<ReviewState> {
+  const articleId = str(f, "articleId");
+  const flagged = f.getAll("flagged").map(String).filter(Boolean).slice(0, 25);
+  const lines = flagged.map((t) => `- ${t.slice(0, 220)}`).join("\n");
+  const instruction = [
+    "Fix ONLY what blocks publication. Rewrite or remove these sentences so they no longer state specific facts about this business",
+    "(its process, what it includes, what it asks for, timelines). Use general, educational wording (\"in general\", \"usually\", \"a good installer will…\") or drop them.",
+    "Keep the verified phone and email exactly as they are. Keep the same language as the article for title, SEO title and meta description.",
+    lines ? `Sentences:\n${lines}` : "",
+  ].filter(Boolean).join(" ").slice(0, 1990);
+  try {
+    const { pb } = await requireUser();
+    await userOperation(pb, "content/revision", { articleId, instruction });
+    done(articleId);
+    return { ok: "Fixing it… this page updates by itself in a few minutes." };
+  } catch (e) { return { error: msg(e) }; }
+}
