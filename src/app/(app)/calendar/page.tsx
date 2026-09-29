@@ -98,7 +98,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
                             <span className="truncate">{it.kind === "planned" ? it.websiteName : it.title}</span>
                           </span>
                         );
-                        return it.articleId ? <Link key={j} href={`/articles/${it.articleId}`} className="block hover:opacity-80">{inner}</Link> : <div key={j}>{inner}</div>;
+                        return it.articleId ? <Link key={j} href={`/review/${it.articleId}`} className="block hover:opacity-80">{inner}</Link> : <div key={j}>{inner}</div>;
                       })}
                       {list.length > 4 && <p className="px-1 text-[11px] text-slate-500">+{list.length - 4} more</p>}
                     </div>

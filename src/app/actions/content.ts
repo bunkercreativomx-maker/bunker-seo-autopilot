@@ -55,7 +55,7 @@ export async function startGenerationAction(_prev: ContentActionState, formData:
   } catch (error) {
     return { error: message(error) };
   }
-  redirect(`/articles/${articleId}`);
+  redirect(`/review/${articleId}`);
 }
 
 async function articleOperation(formData: FormData, path: string, extra: Record<string, unknown>, success: string): Promise<ContentActionState> {

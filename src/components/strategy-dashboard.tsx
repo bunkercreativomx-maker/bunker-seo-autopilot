@@ -232,7 +232,7 @@ const NON_CONTENT_PLAN_ACTIONS = ["add_internal_links", "fix_technical_issue", "
 /** "Generate Content" for approved sources; "Open Draft" once an article exists (no duplicates). */
 function ContentButton({ websiteId, kind, id, status, typeOrAction, opportunity, content, canEdit }: { websiteId: string; kind: "opportunity" | "plan_item"; id: string; status?: string; typeOrAction?: string; opportunity?: string; content: ContentLinks; canEdit: boolean }) {
   const existing = content.byKey[`${kind === "opportunity" ? "opp" : "plan"}:${id}`] ?? (kind === "opportunity" ? content.byOpportunity[id] : opportunity ? content.byOpportunity[opportunity] : undefined);
-  if (existing) return <Link href={`/articles/${existing.id}`} className="text-xs font-medium text-sky-700 hover:underline">Open Draft ({existing.status.replaceAll("_", " ")})</Link>;
+  if (existing) return <Link href={`/review/${existing.id}`} className="text-xs font-medium text-sky-700 hover:underline">Open Draft ({existing.status.replaceAll("_", " ")})</Link>;
   const blocked = kind === "opportunity" ? NON_CONTENT_OPPORTUNITIES.includes(String(typeOrAction)) : NON_CONTENT_PLAN_ACTIONS.includes(String(typeOrAction));
   const approved = kind === "opportunity" ? status === "approved" : status === "approved" || status === "in_progress";
   if (!canEdit || blocked || !approved) return null;

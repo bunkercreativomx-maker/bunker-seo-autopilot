@@ -37,6 +37,9 @@ const obj = (properties) => ({ type: "object", additionalProperties: false, requ
 function isObj(v) { return v && typeof v === "object" && !Array.isArray(v); }
 function arr(v, max) { return Array.isArray(v) && v.length <= max; }
 function strs(v, max) { return arr(v, max) && v.every((x) => typeof x === "string"); }
+// The model sometimes cites ids that don't exist. Drop them (they carry no
+// evidence) instead of failing the whole job; claims are still verified later.
+function keepKnown(ids, allowed) { return Array.isArray(ids) ? ids.filter((id) => typeof id === "string" && allowed.has(id)) : []; }
 function refsKnown(ids, allowed) { return Array.isArray(ids) && ids.every((id) => typeof id === "string" && allowed.has(id)); }
 
 function languageLine(context) {
@@ -88,8 +91,10 @@ ${languageLine(context)}`,
     schema: researchSchema,
     validate(v) {
       if (!isObj(v) || typeof v.search_intent !== "string" || !strs(v.questions, 15)) return "bad shape";
-      if (!arr(v.required_facts, 20) || v.required_facts.some((f) => !refsKnown(f.evidence_ids, known))) return "required_facts reference unknown evidence";
-      if (!arr(v.internal_link_candidates, 10) || v.internal_link_candidates.some((c) => !linkIds.has(c.candidate_id))) return "unknown internal link candidate";
+      if (!arr(v.required_facts, 20)) return "bad required_facts";
+      for (const f of v.required_facts) if (f && typeof f === "object") f.evidence_ids = keepKnown(f.evidence_ids, known);
+      if (!arr(v.internal_link_candidates, 10)) return "bad internal link candidates";
+      v.internal_link_candidates = v.internal_link_candidates.filter((c) => c && linkIds.has(c.candidate_id));
       if (!["sufficient", "limited", "insufficient"].includes(v.research_sufficiency)) return "bad sufficiency";
       return true;
     },
@@ -183,8 +188,8 @@ ${languageLine(context)}`,
       if (!isObj(v) || typeof v.h1 !== "string" || !v.h1.trim() || !arr(v.sections, 20) || !v.sections.length) return "bad shape";
       for (const s of v.sections) {
         if (![2, 3].includes(s.level) || !s.heading?.trim()) return "bad section";
-        if (!refsKnown(s.evidence_ids, known)) return "section references unknown/AI evidence";
-        if (!refsKnown(s.internal_link_ids, linkIds)) return "unknown internal link id";
+        s.evidence_ids = keepKnown(s.evidence_ids, known);
+        s.internal_link_ids = keepKnown(s.internal_link_ids, linkIds);
       }
       return true;
     },

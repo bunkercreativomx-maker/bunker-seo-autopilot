@@ -17,6 +17,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
   const { article: a, jobs, claims } = bundle;
   const pub = await getPublication(pb, a.id).catch(() => null);
   const job = jobs.find((j) => j.status === "queued" || j.status === "running");
+  const lastFailed = !job && (a.status === "failed" || jobs[0]?.status === "failed");
   const w = a.expand?.website;
   const version = Number(a.current_version || 0);
   const issues = claims
@@ -30,7 +31,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
     <div className="mx-auto max-w-4xl">
       <div className="mb-4 flex items-center justify-between text-sm">
         <Link href="/today" className="text-slate-500 hover:text-slate-800">← Today</Link>
-        <Link href={`/articles/${a.id}`} className="text-xs text-slate-400 hover:text-slate-600">Advanced view</Link>
+        <Link href={`/articles/${a.id}?advanced=1`} className="text-xs text-slate-400 hover:text-slate-600">Advanced view</Link>
       </div>
       <ReviewScreen
         canEdit={canWrite(user.role)}
@@ -54,6 +55,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
           version,
           publicUrl: (pub as { public_url?: string } | null)?.public_url || "",
           jobStep: job ? job.step || job.status : "",
+          failed: Boolean(lastFailed),
           issues,
         }}
       />

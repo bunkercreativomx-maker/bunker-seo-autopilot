@@ -27,7 +27,7 @@ export default async function PublishedContentPage({ params }: { params: Promise
               const has = a?.hasData && a.totals;
               return (
                 <tr key={p.id}>
-                  <td className="px-4 py-2"><Link className="text-sky-700" href={`/articles/${p.article}`}>{p.expand?.article?.title ?? p.article}</Link><div className="text-xs text-slate-500">{p.public_url}</div></td>
+                  <td className="px-4 py-2"><Link className="text-sky-700" href={`/review/${p.article}`}>{p.expand?.article?.title ?? p.article}</Link><div className="text-xs text-slate-500">{p.public_url}</div></td>
                   <td className="px-3 py-2"><Badge tone={p.status === "published" ? "green" : "slate"}>{p.status}</Badge></td>
                   <td className="px-3 py-2 text-xs">{a?.daysLive ?? "—"}</td>
                   {has ? (

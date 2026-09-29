@@ -53,7 +53,7 @@ export function ArticleTable({ articles, showClient = true, showWebsite = true }
             {articles.map((a) => (
               <tr key={a.id} className="hover:bg-slate-50">
                 <td className={td}>
-                  <Link href={`/articles/${a.id}`} className="font-medium text-slate-900 hover:text-sky-600">{a.title || a.primary_keyword || "Untitled draft"}</Link>
+                  <Link href={`/review/${a.id}`} className="font-medium text-slate-900 hover:text-sky-600">{a.title || a.primary_keyword || "Untitled draft"}</Link>
                   {a.primary_keyword && <p className="text-xs text-slate-500">{a.primary_keyword}</p>}
                   {(a.flags?.length || a.high_risk) ? <p className="mt-1 text-[11px] text-amber-700">{[...(a.flags ?? [])].slice(0, 3).join(" · ")}</p> : null}
                 </td>

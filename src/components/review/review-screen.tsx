@@ -5,13 +5,13 @@ import { useRouter } from "next/navigation";
 import { Markdown } from "@/components/content/markdown";
 import { cn } from "@/lib/utils";
 import type { ReviewState } from "@/app/actions/review";
-import { approvePublishAction, discardReviewAction, newImageAction, reviewRewriteAction, saveReviewAction } from "@/app/actions/review";
+import { approvePublishAction, discardReviewAction, newImageAction, retryReviewAction, reviewRewriteAction, saveReviewAction } from "@/app/actions/review";
 
 export type ReviewPost = {
   id: string; websiteId: string; websiteName: string; domain: string; status: string;
   title: string; excerpt: string; metaDescription: string; content: string; image: string; keyword: string;
   score: number | null; qaStatus: string; qaSummary: string; factStatus: string; highRisk: boolean; version: number;
-  publicUrl: string; jobStep: string; issues: Array<{ text: string; status: string }>;
+  publicUrl: string; jobStep: string; failed: boolean; issues: Array<{ text: string; status: string }>;
 };
 
 type Act = (p: ReviewState, f: FormData) => Promise<ReviewState>;
@@ -45,16 +45,17 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
   const rew = useAct(reviewRewriteAction);
   const pub = useAct(approvePublishAction);
   const dis = useAct(discardReviewAction);
+  const retry = useAct(retryReviewAction);
 
   const working = Boolean(post.jobStep);
-  const waitingImage = !post.image && REVIEWABLE.includes(post.status);
+  const waitingImage = !post.image && REVIEWABLE.includes(post.status) && Boolean(post.content);
   const publishing = ["publish_queued", "publishing"].includes(post.status);
   // Keep the page fresh while something is happening in the background.
   useEffect(() => {
-    if (!(working || waitingImage || publishing || img.state?.ok || rew.state?.ok || save.state?.ok || pub.state?.ok)) return;
+    if (!(working || waitingImage || publishing || retry.state?.ok || img.state?.ok || rew.state?.ok || save.state?.ok || pub.state?.ok)) return;
     const t = setInterval(() => router.refresh(), 6000);
     return () => clearInterval(t);
-  }, [working, waitingImage, publishing, img.state, rew.state, save.state, pub.state, router]);
+  }, [working, waitingImage, publishing, retry.state, img.state, rew.state, save.state, pub.state, router]);
 
   const hidden = <><input type="hidden" name="articleId" value={post.id} /><input type="hidden" name="websiteId" value={post.websiteId} /><input type="hidden" name="status" value={post.status} /></>;
   const reviewable = REVIEWABLE.includes(post.status) && canEdit;
@@ -62,13 +63,14 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
   const blocked = post.qaStatus === "BLOCKED" || post.factStatus === "blocked";
   const needsTick = post.highRisk || post.qaStatus === "NEEDS_REVISION" || Boolean(pub.state?.needsReview);
   const canPublish = canEdit && !working && !editing && !blocked && !checksPending && ["awaiting_approval", "approved", "publish_failed"].includes(post.status) && Boolean(post.image);
-  const busy = save.pending || img.pending || rew.pending || pub.pending || dis.pending;
+  const busy = save.pending || img.pending || rew.pending || pub.pending || dis.pending || retry.pending;
 
   // ---- status line (plain words)
   let status: { tone: "green" | "amber" | "red" | "blue" | "slate"; text: string };
   if (LIVE.includes(post.status)) status = { tone: post.status === "published" ? "green" : "blue", text: post.status === "published" ? "Live on the website" : "Publishing…" };
   else if (working) status = { tone: "blue", text: WORKING[post.jobStep] || "Working…" };
   else if (post.status === "rejected") status = { tone: "slate", text: "Discarded" };
+  else if (post.failed) status = { tone: "red", text: "The writer got stuck on this post. Press “Try again”." };
   else if (blocked) status = { tone: "red", text: "The checker found claims it couldn’t verify — fix them below or rewrite." };
   else if (checksPending) status = { tone: "blue", text: "Checking the latest changes…" };
   else if (waitingImage) status = { tone: "blue", text: "Making the featured image…" };
@@ -91,6 +93,14 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
         </span>
       </div>
 
+      {post.failed && !working && canEdit && (
+        <form action={retry.run} className="flex items-center gap-3">
+          {hidden}
+          <button disabled={retry.pending} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{retry.pending ? "…" : "Try again"}</button>
+          <Note state={retry.state} />
+        </form>
+      )}
+
       {post.issues.length > 0 && !working && (
         <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-900">
           <p className="font-medium">Double-check these sentences:</p>
@@ -104,6 +114,8 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
           {post.image ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={post.image} alt="" className="h-full w-full object-cover" />
+          ) : !post.content ? (
+            <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">The image is made once the post is written.</div>
           ) : (
             <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-slate-400">
               <span className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-500" />

@@ -48,7 +48,7 @@ export default async function QueryDetailPage({ params, searchParams }: { params
                   <td className="px-3 py-2 text-right">{fmtPct(r.ctr, 2)}</td>
                   <td className="px-3 py-2 text-right">{fmtPos(r.position)}</td>
                   <td className="px-3 py-2 text-xs">
-                    {r.mapping.article && <Link className="text-sky-700" href={`/articles/${r.mapping.article.id}`}>Article: {r.mapping.article.title}</Link>}
+                    {r.mapping.article && <Link className="text-sky-700" href={`/review/${r.mapping.article.id}`}>Article: {r.mapping.article.title}</Link>}
                     {!r.mapping.article && r.mapping.website_page && <span>Page: {r.mapping.website_page.title || r.mapping.website_page.path}</span>}
                     {(r.mapping.strategy_keywords ?? []).length > 0 && <div className="text-slate-500">Strategy: {r.mapping.strategy_keywords!.join(", ")}</div>}
                   </td>

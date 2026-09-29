@@ -30,7 +30,7 @@ export default async function GenerateContentPage({ params, searchParams }: { pa
             {preview.existing_article ? (
               <div className="space-y-3 text-sm">
                 <p>Content already exists for this source (status: <strong>{preview.existing_article.status}</strong>). Repeated generation is blocked to avoid duplicate articles.</p>
-                <Link href={`/articles/${preview.existing_article.id}`} className="inline-block rounded-lg bg-slate-900 px-3.5 py-2 text-sm font-medium text-white">Open Draft</Link>
+                <Link href={`/review/${preview.existing_article.id}`} className="inline-block rounded-lg bg-slate-900 px-3.5 py-2 text-sm font-medium text-white">Open Draft</Link>
               </div>
             ) : (
               <GenerateContentForm websiteId={preview.website.id} sourceKind={preview.source.kind} sourceId={preview.source.id} defaults={preview.defaults} />

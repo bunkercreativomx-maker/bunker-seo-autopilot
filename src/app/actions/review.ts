@@ -101,3 +101,14 @@ export async function discardReviewAction(_p: ReviewState, f: FormData): Promise
     return { ok: "Discarded." };
   } catch (e) { return { error: msg(e) }; }
 }
+
+/** A generation step failed: run it again from where it stopped. */
+export async function retryReviewAction(_p: ReviewState, f: FormData): Promise<ReviewState> {
+  const articleId = str(f, "articleId");
+  try {
+    const { pb } = await requireUser();
+    await userOperation(pb, "content/retry", { articleId });
+    done(articleId);
+    return { ok: "Trying again… this page updates by itself." };
+  } catch (e) { return { error: msg(e) }; }
+}

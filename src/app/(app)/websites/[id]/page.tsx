@@ -145,7 +145,7 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
         </div>
         <div className="divide-y divide-slate-100 px-5 py-2">
           {(posts?.items ?? []).map((a) => (
-            <Link key={a.id} href={`/articles/${a.id}`} className="flex items-center gap-3 py-2.5 hover:opacity-80">
+            <Link key={a.id} href={`/review/${a.id}`} className="flex items-center gap-3 py-2.5 hover:opacity-80">
               <span className="min-w-0 flex-1 truncate text-sm text-slate-800">{String(a.title || a.primary_keyword || "Untitled")}</span>
               <Badge tone={statusTone(String(a.status))}>{friendly(String(a.status))}</Badge>
             </Link>

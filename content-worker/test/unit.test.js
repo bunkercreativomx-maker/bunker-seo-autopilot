@@ -294,12 +294,14 @@ test("brief schema: business facts must cite verified F* ids", async () => {
   assert.equal(ok.business_facts.length, 1);
 });
 
-test("outline schema: rejects AI-inference evidence and unknown links", async () => {
+test("outline schema: drops AI-inference evidence and unknown links instead of failing", async () => {
   const ctx = buildContext(fixture());
   const good = { h1: "H", sections: [{ level: 2, heading: "A", purpose: "p", evidence_ids: ["F1"], internal_link_ids: ["L1"], cta: false }], faq: [], cta_placement: "end" };
   assert.equal((await runOutline(stageCtx(good), ctx, {}, {})).h1, "H");
-  await assert.rejects(runOutline(stageCtx({ ...good, sections: [{ ...good.sections[0], evidence_ids: ["I1"] }] }), ctx, {}, {}), /unknown\/AI evidence/);
-  await assert.rejects(runOutline(stageCtx({ ...good, sections: [{ ...good.sections[0], internal_link_ids: ["L99"] }] }), ctx, {}, {}), /internal link/);
+  const ai = await runOutline(stageCtx({ ...good, sections: [{ ...good.sections[0], evidence_ids: ["I1", "F1"] }] }), ctx, {}, {});
+  assert.deepEqual(ai.sections[0].evidence_ids, ["F1"]);
+  const links = await runOutline(stageCtx({ ...good, sections: [{ ...good.sections[0], internal_link_ids: ["L99", "L1"] }] }), ctx, {}, {});
+  assert.deepEqual(links.sections[0].internal_link_ids, ["L1"]);
 });
 
 test("writer structured response: requires H1 + substantive markdown", async () => {

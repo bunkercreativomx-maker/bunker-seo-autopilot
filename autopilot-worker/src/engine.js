@@ -544,8 +544,8 @@ export class Engine {
       await this.event(run, "action_failed", `${a.action_type} failed: ${code} (${cls})${retryable(cls) ? " — may retry on a later run" : " — no automatic retry"}`, { code, class: cls }, a.id);
       await this.audit(run, "AUTOPILOT_ACTION_FAILED", "autopilot_action", a.id, { action_type: a.action_type, error_code: code, error_class: cls });
       await this.circuit(run, a.action_type, cls, code);
-      if (code === "SLUG_CONFLICT") await this.task(run, { kind: "slug_conflict", title: "Resolve slug conflict before publishing", body: message, dedup_key: `slug:${a.target_id}`, link: `/articles/${a.target_id}` });
-      if (code === "HIGH_RISK_REVIEW_REQUIRED") await this.task(run, { kind: "high_risk_review", title: "High-risk article — publish manually after review", body: message, dedup_key: `highrisk:${a.target_id}`, link: `/articles/${a.target_id}` });
+      if (code === "SLUG_CONFLICT") await this.task(run, { kind: "slug_conflict", title: "Resolve slug conflict before publishing", body: message, dedup_key: `slug:${a.target_id}`, link: `/review/${a.target_id}` });
+      if (code === "HIGH_RISK_REVIEW_REQUIRED") await this.task(run, { kind: "high_risk_review", title: "High-risk article — publish manually after review", body: message, dedup_key: `highrisk:${a.target_id}`, link: `/review/${a.target_id}` });
       if (cls === "CONFIGURATION" && a.action_type.includes("PUBLISH")) await this.ping(run, `integ:${run.website}:${code}:${this.ts().slice(0, 10)}`, `⚠️ Could not publish — website connection problem (${code}).`);
       if (cls === "CONFIGURATION" && a.action_type.includes("PUBLISH")) await this.task(run, { kind: "publishing_integration", title: "Fix the publishing integration", body: message, dedup_key: `integration:${run.website}:${code}`, severity: "critical", link: `/websites/${run.website}/publishing` });
       return { ok: false, code, cls };
@@ -677,10 +677,10 @@ export class Engine {
       const key = `approval:${art.id}:v${art.current_version}`;
       if (art.status === "awaiting_approval") {
         await this.ensureImage(run, art);
-        const t = await this.task(run, { kind: "article_approval", title: `Article ready for approval: ${art.title || art.primary_keyword}`, body: `Version ${art.current_version} passed the Phase 4 pipeline (fact check ${art.fact_check_status}, QA ${art.qa_status}${art.high_risk ? ", HIGH RISK" : ""}). Autopilot never approves content.${snapshot.publish_after_human_approval && !art.high_risk ? " After your approval Autopilot will publish this version to the configured staging target." : ""}`, dedup_key: key, run: run.id, link: `/articles/${art.id}`, remindDays: snapshot.approval_reminder_days, severity: "info" });
+        const t = await this.task(run, { kind: "article_approval", title: `Article ready for approval: ${art.title || art.primary_keyword}`, body: `Version ${art.current_version} passed the Phase 4 pipeline (fact check ${art.fact_check_status}, QA ${art.qa_status}${art.high_risk ? ", HIGH RISK" : ""}). Autopilot never approves content.${snapshot.publish_after_human_approval && !art.high_risk ? " After your approval Autopilot will publish this version to the configured staging target." : ""}`, dedup_key: key, run: run.id, link: `/review/${art.id}`, remindDays: snapshot.approval_reminder_days, severity: "info" });
         // Reminder after N days; stays waiting forever — never auto-approves.
         if (t.status === "open" && t.remind_at && Date.parse(String(t.remind_at).replace(" ", "T")) <= this.now()) {
-          await this.notify(run, { kind: "autopilot_article_approval", severity: "info", title: `Reminder: article waiting for approval — ${art.title || art.primary_keyword}`, dedupe_key: `autopilot:${key}`, link: `/articles/${art.id}`, reopen: true });
+          await this.notify(run, { kind: "autopilot_article_approval", severity: "info", title: `Reminder: article waiting for approval — ${art.title || art.primary_keyword}`, dedupe_key: `autopilot:${key}`, link: `/review/${art.id}`, reopen: true });
           await this.col("autopilot_tasks").update(t.id, { reminders_sent: Number(t.reminders_sent || 0) + 1, remind_at: iso(this.now() + snapshot.approval_reminder_days * DAY), updated_at: this.ts() }, { requestKey: null });
         }
         if (!(snapshot.auto_publish_safe && art.qa_status === "PASS" && art.fact_check_status === "passed" && !art.high_risk)) {

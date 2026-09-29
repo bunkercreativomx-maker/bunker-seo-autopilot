@@ -52,7 +52,7 @@ export default async function PagesPage({ params, searchParams }: { params: Prom
                   <td className="px-3 py-2 text-right">{fmtPos(r.position)}</td>
                   <td className="px-3 py-2"><ChangeCell change={r.change.clicks} /></td>
                   <td className="px-3 py-2 text-xs">{r.mapping.website_page ? (r.mapping.website_page.title || r.mapping.website_page.path) : "—"}</td>
-                  <td className="px-3 py-2 text-xs">{r.mapping.article ? <Link className="text-sky-700" href={`/articles/${r.mapping.article.id}`}>{r.mapping.article.title}</Link> : "—"}</td>
+                  <td className="px-3 py-2 text-xs">{r.mapping.article ? <Link className="text-sky-700" href={`/review/${r.mapping.article.id}`}>{r.mapping.article.title}</Link> : "—"}</td>
                   <td className="px-3 py-2 text-xs text-slate-600">{(r.mapping.strategy_keywords ?? []).slice(0, 3).join(", ") || "—"}</td>
                 </tr>
               ))}

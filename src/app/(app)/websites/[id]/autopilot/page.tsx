@@ -135,7 +135,7 @@ export default async function WebsiteAutopilotPage({ params }: { params: Promise
           ))}
           {waiting.map((a) => (
             <div key={a.id} className="rounded-lg border border-slate-200 px-3 py-2">
-              <p className="text-sm"><Badge tone="amber">{a.action_type}</Badge> {a.target_type} {a.article ? <Link className="text-sky-700 hover:underline" href={`/articles/${a.article}`}>open article</Link> : a.target_id}</p>
+              <p className="text-sm"><Badge tone="amber">{a.action_type}</Badge> {a.target_type} {a.article ? <Link className="text-sky-700 hover:underline" href={`/review/${a.article}`}>open article</Link> : a.target_id}</p>
               <WhyPanel action={a} decision={decisionById.get(a.decision)} signal={signalById.get(decisionById.get(a.decision)?.signal ?? "")} run={runById.get(a.run)} />
             </div>
           ))}

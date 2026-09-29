@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { requireUser, canWrite } from "@/lib/pocketbase/auth";
 import { getArticleBundle } from "@/lib/pocketbase/content";
 import { approvalBlockers, diffLines } from "@/lib/content/core";
@@ -40,9 +40,11 @@ function claimTone(status: string): "slate" | "green" | "amber" | "red" | "blue"
   return "slate";
 }
 
-export default async function ArticlePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; compare?: string }> }) {
+export default async function ArticlePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; compare?: string; advanced?: string }> }) {
   const { id } = await params;
   const sp = await searchParams;
+  // Everyday work happens on the one-screen review; this page is the advanced view.
+  if (!sp.advanced && !sp.tab && !sp.compare) redirect(`/review/${id}`);
   const tab: Tab = (TABS as readonly string[]).includes(String(sp.tab)) ? (sp.tab as Tab) : "content";
   const { pb, user } = await requireUser();
   const bundle = await getArticleBundle(pb, id);
@@ -452,7 +454,7 @@ export default async function ArticlePage({ params, searchParams }: { params: Pr
                       <td className="px-4 py-2 text-xs">{formatDateTime(v.created)}</td>
                       <td className="px-4 py-2 text-xs">
                         <div className="flex items-center gap-3">
-                          {v.version !== a.current_version && <Link href={`/articles/${a.id}?tab=history&compare=${v.version}`} className="text-sky-700">Compare with current</Link>}
+                          {v.version !== a.current_version && <Link href={`/articles/${a.id}?advanced=1&tab=history&compare=${v.version}`} className="text-sky-700">Compare with current</Link>}
                           {editable && v.version !== a.current_version && !locked && <ActionForm action={restoreVersionAction} hidden={{ ...hidden, version: v.version }} variant="ghost" submitLabel="Restore" confirm={`Restore v${v.version}? A new version will be created.`} />}
                         </div>
                       </td>
