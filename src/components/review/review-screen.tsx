@@ -91,6 +91,17 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
   else status = { tone: "green", text: needsTick ? "Ready. Read it once, tick the box and publish." : "Ready to publish." };
   const tones = { green: "bg-emerald-50 text-emerald-800 ring-emerald-200", amber: "bg-amber-50 text-amber-800 ring-amber-200", red: "bg-rose-50 text-rose-800 ring-rose-200", blue: "bg-sky-50 text-sky-800 ring-sky-200", slate: "bg-slate-50 text-slate-700 ring-slate-200" };
 
+  if (post.status === "rejected") {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center">
+        <p className="text-3xl">🗑️</p>
+        <p className="mt-2 text-base font-semibold text-slate-800">This post was discarded</p>
+        <p className="mt-1 text-sm text-slate-500">It won’t be published, it’s hidden from your lists, and Autopilot won’t write this topic again.</p>
+        <a href="/today" className="mt-5 inline-block rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Back to Today</a>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 pb-32">
       {/* status */}

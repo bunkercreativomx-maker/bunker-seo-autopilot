@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/pocketbase/auth";
 import { OperationError, userOperation } from "@/lib/pocketbase/operations";
 
@@ -98,8 +99,8 @@ export async function discardReviewAction(_p: ReviewState, f: FormData): Promise
     const { pb } = await requireUser();
     await userOperation(pb, "content/reject", { articleId, reason: str(f, "reason") || "Discarded in review" });
     done(articleId);
-    return { ok: "Discarded." };
   } catch (e) { return { error: msg(e) }; }
+  redirect("/today?discarded=1");
 }
 
 /** A generation step failed: run it again from where it stopped. */

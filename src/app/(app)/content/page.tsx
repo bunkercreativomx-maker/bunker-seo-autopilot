@@ -22,7 +22,7 @@ export default async function ContentDashboardPage({ searchParams }: { searchPar
   const language = sp.language && /^[a-z]{2}(-[a-z]{2})?$/i.test(sp.language) ? sp.language : undefined;
   const clients = await listClients(pb);
   const websites = await listWebsites(pb);
-  const base = await listArticles(pb, { client, website, content_type: type, language });
+  const base = await listArticles(pb, { client, website, content_type: type, language, status: status === "rejected" ? "rejected" : undefined });
   const group = STATUS_GROUPS.find((g) => g.key === sp.group);
   const articles = base.filter((a) => (status ? a.status === status : true) && (group ? group.statuses.includes(a.status) : true));
   const languages = Array.from(new Set(base.map((a) => a.language).filter(Boolean)));

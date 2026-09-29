@@ -17,7 +17,9 @@ export async function listArticles(pb: PocketBase, filters: ContentFilters = {},
   if (filters.client) parts.push(`client = ${q(filters.client)}`);
   if (filters.website) parts.push(`website = ${q(filters.website)}`);
   if (filters.content_type) parts.push(`content_type = ${q(filters.content_type)}`);
+  // Discarded posts are gone for everyday work; only shown when asked for.
   if (filters.status) parts.push(`status = ${q(filters.status)}`);
+  else parts.push(`status != "rejected"`);
   if (filters.language) parts.push(`language = ${q(filters.language)}`);
   try {
     const res = await pb.collection("articles").getList<Article>(1, limit, {

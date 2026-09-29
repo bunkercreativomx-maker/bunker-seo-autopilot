@@ -11,7 +11,8 @@ const STEP: Record<string, string> = {
   draft: "Writing", fact_checking: "Checking facts", qa: "Scoring", revising: "Polishing",
 };
 
-export default async function TodayPage() {
+export default async function TodayPage({ searchParams }: { searchParams: Promise<{ discarded?: string }> }) {
+  const sp = await searchParams;
   const { pb, user } = await requireUser();
   const t = await loadToday(pb);
   const canEdit = isAdmin(user.role);
@@ -28,6 +29,8 @@ export default async function TodayPage() {
           {t.writing.length > 0 && ` ${t.writing.length} being written.`}
         </p>
       </header>
+
+      {sp.discarded && <p className="rounded-xl bg-slate-100 px-4 py-2 text-sm text-slate-600">Post discarded and removed.</p>}
 
       {/* 1. Ready to publish */}
       <section className="space-y-3">
