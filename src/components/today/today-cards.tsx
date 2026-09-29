@@ -5,7 +5,7 @@ import { useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { TodayState } from "@/app/actions/today";
-import { discardPostAction, publishPostAction, rewritePostAction, siteSettingsAction, writeNowAction } from "@/app/actions/today";
+import { siteSettingsAction, writeNowAction } from "@/app/actions/today";
 import type { TodayPost, TodaySite } from "@/lib/pocketbase/today";
 import { cn } from "@/lib/utils";
 
@@ -39,65 +39,35 @@ export function ScoreRing({ score, blocked }: { score: number | null; blocked?: 
   );
 }
 
-/** A post waiting for the human: Publish · Edit · Rewrite · Discard. */
+/** A post waiting for the human → one button to the single review screen. */
 export function ReadyCard({ post }: { post: TodayPost }) {
-  const pub = useAct(publishPostAction);
-  const dis = useAct(discardPostAction);
-  const rew = useAct(rewritePostAction);
-  const [mode, setMode] = useState<"" | "rewrite" | "discard">("");
-  const needsTick = post.highRisk || post.qaStatus === "NEEDS_REVISION" || pub.state?.needsReview;
-  const busy = pub.pending || dis.pending || rew.pending;
-  const hidden = <><input type="hidden" name="articleId" value={post.id} /><input type="hidden" name="websiteId" value={post.websiteId} /></>;
-
+  const approved = post.status === "approved";
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md">
-      <div className="flex items-start gap-4">
+    <Link href={`/review/${post.id}`} className="group flex overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md">
+      <div className="relative hidden w-44 shrink-0 bg-slate-100 sm:block">
+        {post.image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={post.image} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-[11px] text-slate-400">Making image…</div>
+        )}
+      </div>
+      <div className="flex min-w-0 flex-1 items-start gap-4 p-5">
         <ScoreRing score={post.score} />
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{post.websiteName}</p>
-          <Link href={`/articles/${post.id}`} className="mt-0.5 block text-base font-semibold leading-snug text-slate-900 hover:underline">{post.title}</Link>
+          <p className="mt-0.5 text-base font-semibold leading-snug text-slate-900 group-hover:underline">{post.title}</p>
           {post.excerpt && <p className="mt-1 line-clamp-2 text-sm text-slate-500">{post.excerpt}</p>}
-          <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-            {post.keyword && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">🔎 {post.keyword}</span>}
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+            <span className={cn("rounded-lg px-3 py-1.5 text-sm font-semibold text-white", approved ? "bg-amber-500" : "bg-emerald-600")}>
+              {approved ? "Approved — publish it →" : "Review & publish →"}
+            </span>
             {post.highRisk && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">Sensitive topic</span>}
-            {post.qaStatus === "NEEDS_REVISION" && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">Checker left notes</span>}
+            {!post.image && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">Image on the way</span>}
           </div>
         </div>
       </div>
-
-      <form action={pub.run} className="mt-4 flex flex-wrap items-center gap-2">
-        {hidden}
-        {needsTick && (
-          <label className="flex w-full items-center gap-2 text-xs text-slate-600">
-            <input type="checkbox" name="reviewed" className="h-4 w-4 rounded border-slate-300" /> I read it and it’s correct
-          </label>
-        )}
-        <button disabled={busy} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-          {pub.pending ? "Publishing…" : "Publish"}
-        </button>
-        <Link href={`/articles/${post.id}`} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50">Edit</Link>
-        <button type="button" onClick={() => setMode(mode === "rewrite" ? "" : "rewrite")} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Rewrite</button>
-        <button type="button" onClick={() => setMode(mode === "discard" ? "" : "discard")} className="ml-auto rounded-lg px-3 py-2 text-sm font-medium text-slate-400 hover:bg-rose-50 hover:text-rose-600">Discard</button>
-      </form>
-      <Note state={pub.state} />
-
-      {mode === "rewrite" && (
-        <form action={rew.run} className="mt-3 flex gap-2">
-          {hidden}
-          <input name="instruction" placeholder="What should change? e.g. shorter, add free quote CTA" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          <button disabled={busy} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{rew.pending ? "…" : "Send"}</button>
-        </form>
-      )}
-      <Note state={rew.state} />
-      {mode === "discard" && (
-        <form action={dis.run} className="mt-3 flex gap-2">
-          {hidden}
-          <input name="reason" placeholder="Why? (optional)" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          <button disabled={busy} className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">{dis.pending ? "…" : "Discard"}</button>
-        </form>
-      )}
-      <Note state={dis.state} />
-    </div>
+    </Link>
   );
 }
 

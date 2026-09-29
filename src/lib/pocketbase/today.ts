@@ -20,6 +20,7 @@ export type TodayPost = {
   updated: string;
   excerpt: string;
   publicUrl: string;
+  image: string;
 };
 
 export type TodaySite = {
@@ -39,8 +40,8 @@ type Raw = Record<string, unknown> & { id: string };
 const s = (v: unknown) => (typeof v === "string" ? v : "");
 
 export const IN_PROGRESS = ["queued", "researching", "brief_ready", "outlining", "drafting", "draft", "fact_checking", "qa", "revising"];
-const READY = ["awaiting_approval"];
-const LIVE = ["published", "publish_queued", "publishing", "approved"];
+const READY = ["awaiting_approval", "approved"];
+const LIVE = ["published", "publish_queued", "publishing"];
 
 /** 0-100 score shown to humans. QA BLOCKED / fact-check blocked never show as green. */
 function scoreOf(a: Raw): number | null {
@@ -67,11 +68,12 @@ function toPost(a: Raw, pubs: Map<string, string>): TodayPost {
     updated: s(a.updated_at) || s(a.updated),
     excerpt: s(a.excerpt) || s(a.meta_description),
     publicUrl: pubs.get(a.id) || "",
+    image: s(a.featured_image),
   };
 }
 
 export async function loadToday(pb: PocketBase) {
-  const fields = "id,title,primary_keyword,status,qa_score,qa_status,fact_check_status,high_risk,website,updated,updated_at,excerpt,meta_description,expand.website.name,expand.website.domain";
+  const fields = "id,title,primary_keyword,status,qa_score,qa_status,fact_check_status,high_risk,featured_image,website,updated,updated_at,excerpt,meta_description,expand.website.name,expand.website.domain";
   const [articles, websites, policies, pubs] = await Promise.all([
     pb.collection("articles").getFullList<Raw>({ sort: "-updated", expand: "website", fields, filter: `status != "rejected"`, requestKey: null }).catch(() => [] as Raw[]),
     pb.collection("websites").getFullList<Raw>({ sort: "name", requestKey: null }).catch(() => [] as Raw[]),

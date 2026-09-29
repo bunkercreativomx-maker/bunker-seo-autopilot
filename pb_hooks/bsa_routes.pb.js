@@ -60,6 +60,11 @@ routerAdd("POST", "/api/bsa/content/cancel", (e) => {
   return lib.handle(e, (actor, body) => lib.cancelJob(actor, body));
 }, $apis.requireAuth("users"));
 
+routerAdd("POST", "/api/bsa/content/image", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  return lib.handle(e, (actor, body) => lib.requestNewImage(actor, body));
+}, $apis.requireAuth("users"));
+
 routerAdd("POST", "/api/bsa/strategy/record", (e) => {
   const lib = require(`${__hooks}/bsa_lib.js`);
   return lib.handle(e, (actor, body) => lib.updateStrategyRecord(actor, body));

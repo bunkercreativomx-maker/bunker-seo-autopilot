@@ -45,6 +45,7 @@ export function autoPublishBlockers(a) {
   if (sc === null || sc < AUTO_PUBLISH_MIN_SCORE) b.push(`score ${sc ?? "none"} < ${AUTO_PUBLISH_MIN_SCORE}`);
   if (a.fact_check_status !== "passed") b.push(`fact check ${a.fact_check_status || "pending"}`);
   if (a.high_risk) b.push("sensitive topic");
+  if (!a.featured_image) b.push("no featured image yet");
   if (Array.isArray(a.risk_categories) && a.risk_categories.length) b.push(`risk: ${a.risk_categories.join(",")}`);
   const bad = (Array.isArray(a.flags) ? a.flags : []).map((f) => (typeof f === "string" ? f : f?.code || f?.type || JSON.stringify(f))).filter((f) => !HARMLESS_FLAGS.has(f));
   if (bad.length) b.push(`flags: ${bad.join(",")}`);

@@ -302,9 +302,10 @@ test("auto-pick: approved topics win; one proposed topic per run; review-needing
 
 // ---------------------------------------------------------------- safe auto-publish
 test("safe auto-publish: only clean posts publish themselves; everything else waits for a human", () => {
-  const base = { managed: true, status: "awaiting_approval", current_version: 2, qa_status: "PASS", qa_score: { score: 92 }, fact_check_status: "passed", high_risk: false, risk_categories: [], flags: ["RESEARCH_LIMITED"] };
+  const base = { managed: true, status: "awaiting_approval", current_version: 2, qa_status: "PASS", qa_score: { score: 92 }, fact_check_status: "passed", high_risk: false, risk_categories: [], flags: ["RESEARCH_LIMITED"], featured_image: "https://img.example/a.jpg" };
   const arts = [
     { ...base, id: "ok" },
+    { ...base, id: "noimage", featured_image: "" },
     { ...base, id: "low", qa_score: { score: 80 } },
     { ...base, id: "fact", fact_check_status: "issues" },
     { ...base, id: "risk", high_risk: true },
@@ -315,7 +316,7 @@ test("safe auto-publish: only clean posts publish themselves; everything else wa
   const on = run(ctx({ policy: { auto_publish_safe: true, max_publications_per_week: 10, max_actions_per_day: 20 }, articles: arts }));
   const auto = on.filter((x) => x.planned_action?.action_type === "AUTO_PUBLISH" && !x.planned_action.blocked).map((x) => x.planned_action.target_id);
   assert.deepEqual(auto, ["ok"]);
-  for (const id of ["low", "fact", "risk", "claim", "unknownflag"]) assert.ok(on.some((x) => x.signal?.source_record === id && x.rule === "publish.auto_safe.held"), id);
+  for (const id of ["low", "fact", "risk", "claim", "unknownflag", "noimage"]) assert.ok(on.some((x) => x.signal?.source_record === id && x.rule === "publish.auto_safe.held"), id);
   assert.ok(!on.some((x) => x.signal?.source_record === "notmine"), "unmanaged articles produce no signal at all");
   // switch off -> nothing auto-publishes
   const off = run(ctx({ policy: { auto_publish_safe: false }, articles: arts }));
@@ -329,7 +330,7 @@ test("safe auto-publish: only clean posts publish themselves; everything else wa
 });
 
 test("safe auto-publish respects the weekly publication limit", () => {
-  const base = { managed: true, status: "awaiting_approval", current_version: 1, qa_status: "PASS", qa_score: 95, fact_check_status: "passed", flags: [] };
+  const base = { managed: true, status: "awaiting_approval", current_version: 1, qa_status: "PASS", qa_score: 95, fact_check_status: "passed", flags: [], featured_image: "https://img.example/b.jpg" };
   const c = ctx({ policy: { auto_publish_safe: true, max_publications_per_week: 1 }, articles: [{ ...base, id: "x1" }, { ...base, id: "x2" }] });
   const d = run(c);
   const ok = d.filter((x) => x.planned_action?.action_type === "AUTO_PUBLISH" && !x.planned_action.blocked);

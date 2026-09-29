@@ -31,6 +31,7 @@ function autoPublishBlockers(a) {
   if (sc === null || Math.round(sc) < AUTO_PUBLISH_MIN_SCORE) b.push("score " + sc + " < " + AUTO_PUBLISH_MIN_SCORE);
   if (a.fact_check_status !== "passed") b.push("fact check " + (a.fact_check_status || "pending"));
   if (a.high_risk) b.push("sensitive topic");
+  if (!a.featured_image) b.push("no featured image yet");
   if (Array.isArray(a.risk_categories) && a.risk_categories.length) b.push("risk categories");
   const flags = Array.isArray(a.flags) ? a.flags : [];
   for (const f of flags) {

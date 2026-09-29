@@ -507,6 +507,20 @@ function approveArticle(actor, body) {
   return updated;
 }
 
+// "New image": clears the featured image of a post still under review so the
+// Autopilot worker generates a fresh one (optionally guided by a short hint).
+// Approved/published content is locked (its snapshot is what gets published).
+function requestNewImage(actor, body) {
+  assertContentWriter(actor);
+  const article = articleFor(actor, body.articleId);
+  if (["awaiting_approval", "needs_revision", "draft"].indexOf(String(article.status)) === -1) fail(409, "INVALID_STATE", "Only posts under review can get a new image.");
+  const hint = clean(body.hint, 300);
+  const prov = Object.assign({}, article.provenance || {}, { image_hint: hint, image_requested_at: now() });
+  updateRec("articles", article.id, { featured_image: "", provenance: prov, updated_at: now() });
+  articleActivity($app, article, actor, "ARTICLE_IMAGE_REQUESTED", { hint: hint });
+  return { ok: true };
+}
+
 function rejectArticle(actor, body) {
   assertContentWriter(actor);
   const why = clean(body.reason, 2000);
@@ -656,6 +670,6 @@ function handle(e, fn) {
 module.exports = {
   CONTENT_TYPES, now, clean, fail, toObj, getOne, findFirst, findMany, createRec, updateRec, logActivity, articleActivity, requestUser, safeLog, handle, logout,
   validateInputs, approvalBlockers, startGeneration, retryGeneration, continueAfterBrief, requestRecheck, cancelJob,
-  saveBrief, saveManualEdit, restoreVersion, approveArticle, rejectArticle, requestRevision,
+  saveBrief, saveManualEdit, restoreVersion, approveArticle, rejectArticle, requestRevision, requestNewImage,
   updateStrategyRecord, updateOrganization,
 };

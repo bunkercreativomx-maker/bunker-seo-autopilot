@@ -110,19 +110,31 @@ export class Engine {
     await this.telegram(`${w ? `[${w.name || w.domain}] ` : ""}${text}${this.appUrl ? `\n${this.appUrl}/today` : ""}`);
   }
 
-  // One image attempt per article version per day (FAL); a failure never blocks the post.
+  // One image attempt per article version / image request per day (FAL); a failure never blocks the post.
   async ensureImage(run, art) {
     if (!this.images || art.featured_image) return;
-    const k = `img:${art.id}:v${art.current_version}:${this.ts().slice(0, 10)}`;
+    const req = String(art.provenance?.image_requested_at || "").replace(/[^0-9]/g, "").slice(0, 14);
+    const k = `img:${art.id}:v${art.current_version}:${req || this.ts().slice(0, 10)}`;
     if (await this.first("notifications", `organization = "${esc(run.organization)}" && dedupe_key = "${esc(k)}"`)) return;
-    const r = await this.images(art);
-    await this.col("notifications").create({ organization: run.organization, website: run.website, kind: "autopilot_image", severity: r.ok ? "info" : "warning", title: r.ok ? `Image added: ${art.title || ""}`.slice(0, 300) : `Image not generated (${r.code})`, body: "", link: "", dedupe_key: k, occurrences: 1, read_at: this.ts(), created_at: this.ts(), updated_at: this.ts() }, { requestKey: null });
+    const w = art.website ? await this.one("websites", art.website).catch(() => null) : null;
+    const r = await this.images(art, { hint: String(art.provenance?.image_hint || ""), business: String(w?.name || "") });
+    await this.col("notifications").create({ organization: run.organization, website: run.website || art.website, kind: "autopilot_image", severity: r.ok ? "info" : "warning", title: r.ok ? `Image added: ${art.title || ""}`.slice(0, 300) : `Image not generated (${r.code})`, body: "", link: `/review/${art.id}`, dedupe_key: k, occurrences: 1, read_at: this.ts(), created_at: this.ts(), updated_at: this.ts() }, { requestKey: null });
     if (!r.ok) return;
     const fresh = await this.one("articles", art.id);
     // Only before approval and only if still the same version: never alters approved content.
-    if (!fresh || fresh.status !== "awaiting_approval" || Number(fresh.current_version) !== Number(art.current_version) || fresh.featured_image) return;
+    if (!fresh || !IMAGE_STATES.includes(fresh.status) || Number(fresh.current_version) !== Number(art.current_version) || fresh.featured_image) return;
     await this.col("articles").update(art.id, { featured_image: r.url, updated_at: this.ts() }, { requestKey: null });
     art.featured_image = r.url;
+  }
+
+  // Every post under review gets a featured image, whoever created it.
+  async sweepImages() {
+    if (!this.images) return;
+    const list = await this.all("articles", `featured_image = "" && (status = "awaiting_approval" || status = "needs_revision")`, { fields: "id,organization,website,title,primary_keyword,current_version,status,featured_image,provenance" });
+    for (const art of list.slice(0, 3)) {
+      try { await this.ensureImage({ organization: art.organization, website: art.website }, art); }
+      catch (e) { this.logger.error(`[autopilot] image sweep ${String(e?.message || e).slice(0, 200)}`); }
+    }
   }
 
   async task(scope, { kind, title, body = "", link = "", evidence = {}, dedup_key, run = "", action = "", remindDays = 0, notify = true, severity = "warning" }) {
@@ -282,7 +294,7 @@ export class Engine {
     const managed = new Set(managedActs.filter((a) => a.action_type === "GENERATE_CONTENT").map((a) => a.article));
     const revisions = {};
     for (const a of managedActs) if (a.action_type === "REQUEST_REVISION" && !["skipped", "cancelled", "blocked", "planned"].includes(a.status)) revisions[a.article] = (revisions[a.article] || 0) + 1;
-    const arts = await this.all("articles", `website = "${wid}"`, { fields: "id,status,title,primary_keyword,recommended_url,content_opportunity,current_version,qa_status,qa_score,flags,risk_categories,fact_check_status,high_risk,approved_by,approved_at,approved_version,approved_hash,updated_at,expand.approved_by.name", expand: "approved_by" });
+    const arts = await this.all("articles", `website = "${wid}"`, { fields: "id,status,title,primary_keyword,recommended_url,content_opportunity,current_version,qa_status,qa_score,flags,risk_categories,fact_check_status,high_risk,featured_image,approved_by,approved_at,approved_version,approved_hash,updated_at,expand.approved_by.name", expand: "approved_by" });
     const pubs = await this.all("article_publications", `website = "${wid}"`, { fields: "id,article,status,public_url,article_version,published_at,updated,updated_at" });
     const pubBy = Object.fromEntries(pubs.map((p) => [p.article, p]));
     const outcomes = await this.all("autopilot_outcomes", `website = "${wid}"`, { fields: "article,changed_at", sort: "-changed_at" });
@@ -824,9 +836,11 @@ export class Engine {
     await this.schedule();
     await this.claimQueued();
     await this.sweepMonitoring();
+    await this.sweepImages();
   }
 }
 
+const IMAGE_STATES = ["awaiting_approval", "needs_revision"];
 const PUBLISHED = ["publish_queued", "publishing", "published", "publish_failed", "unpublished"];
 
 function normalize(v) {

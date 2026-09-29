@@ -66,7 +66,7 @@ export default async function TodayPage() {
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Couldn’t finish — take a look</h2>
           <div className="divide-y divide-slate-100 rounded-2xl border border-amber-200 bg-amber-50/40">
             {t.attention.map((p) => (
-              <Link key={p.id} href={`/articles/${p.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-amber-50">
+              <Link key={p.id} href={`/review/${p.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-amber-50">
                 <ScoreRing score={p.score} blocked />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-slate-800">{p.title}</p>
