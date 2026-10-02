@@ -28,10 +28,27 @@ export default async function HubIndex({ params }: Props) {
   const L = t(s.language);
   const fmt = (d: string) => (d ? new Date(d).toLocaleDateString(L.locale, { day: "numeric", month: "long", year: "numeric" }) : "");
   const th = themeFor(site);
+  const ld = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "Blog",
+    name: `Blog — ${s.name}`,
+    url: publicUrl(s),
+    inLanguage: s.language || undefined,
+    publisher: { "@type": "Organization", name: s.name, url: s.site_url, ...(s.phone ? { telephone: s.phone } : {}) },
+    blogPost: posts.slice(0, 20).map((p) => ({
+      "@type": "BlogPosting",
+      headline: p.title,
+      url: publicUrl(s, p.slug),
+      ...(p.published_at ? { datePublished: p.published_at } : {}),
+      ...(p.featured_image ? { image: p.featured_image } : {}),
+    })),
+  }).replace(/</g, "\\u003c");
+  const ldTag = <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: ld }} />;
   if (th) {
     const tn = telOf(s.phone);
     return (
       <>
+        {ldTag}
         <section className="bh-hero" style={th.heroImage ? { backgroundImage: `linear-gradient(100deg, rgba(0,46,91,.96) 35%, rgba(0,46,91,.72)), url(${th.heroImage})` } : undefined}>
           <div className="bh-in">
             <span className="bh-kicker">Blog</span>
@@ -70,6 +87,7 @@ export default async function HubIndex({ params }: Props) {
   }
   return (
     <section>
+      {ldTag}
       <div className="hub-hero">
         <h1>Blog</h1>
         <p>{L.heroSub(s.name)}</p>
