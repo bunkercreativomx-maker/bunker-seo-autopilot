@@ -5,6 +5,7 @@
 import { callTask } from "./ai-provider.js";
 import { evidenceBlock } from "./context.js";
 import { safeText } from "./text.js";
+import { topicsIn } from "./checks.js";
 
 export const CONTENT_TYPES = ["blog_article", "service_page", "location_page", "guide", "comparison", "faq_page", "existing_page_optimization"];
 
@@ -208,8 +209,12 @@ const draftSchema = obj({
 const TOPIC_FACT_TYPES = { warranty: ["warranty", "guarantee"], certification: ["certification", "credential"], financing: ["financing"], promotion: ["promotion", "price"] };
 function unverifiedTopicList(context) {
   const verifiedTypes = new Set(context.verified_facts.map((f) => f.type));
-  const banned = Object.entries(TOPIC_FACT_TYPES).filter(([, types]) => !types.some((t) => verifiedTypes.has(t))).map(([topic]) => topic);
-  banned.push("years in business / experience", "project or installation counts / references / case studies / testimonials", "savings percentages");
+  // A verified service/product like "Crédito nuevo" makes its topic (financing) a verified topic.
+  const valueTopics = new Set(context.verified_facts.filter((f) => !String(f.value || "").startsWith("NOT OFFERED")).flatMap((f) => topicsIn(`${f.label || ""} ${f.value || ""}`)));
+  const banned = Object.entries(TOPIC_FACT_TYPES).filter(([topic, types]) => !types.some((t) => verifiedTypes.has(t)) && !valueTopics.has(topic)).map(([topic]) => topic);
+  const hasYears = context.verified_facts.some((f) => /\b\d+\s*(años|anos|years)\b/i.test(String(f.value || "")) && !String(f.value || "").startsWith("NOT OFFERED"));
+  if (!hasYears) banned.push("years in business / experience");
+  banned.push("project or installation counts / references / case studies / testimonials", "savings percentages");
   return ` For this business the following topics are NOT verified and are forbidden in the copy: ${banned.join(", ")}.`;
 }
 
@@ -227,6 +232,7 @@ function writerRules(context) {
 - Describe how a solar/technical process works as general, stable knowledge; do not turn it into specific promises about what this business does unless F* says so.
 - Never invent statistics, percentages, prices, quotes, testimonials, case studies, credentials, awards, guarantees or sources. Numbers must come from F* or S* evidence.
 - External facts must be supported by S* sources, which are INTERNAL evidence for the fact checker. ${commercial ? "Do NOT put external links or raw URLs in the copy of this page; do not add a references/sources list." : "Link a source only when it genuinely helps the reader, using its exact S* url; never list raw URLs."}
+- GOAL OF THE PAGE: make the reader want to contact the business. Answer the question well, then leave a natural reason to reach out: their own case depends on details the business can review with them (e.g. "cada caso es distinto: llámanos y te decimos qué opción te queda" / "every system is different — call us and we'll tell you what yours needs"). Add a short CTA after the intro or first main section and a stronger closing CTA section. Curiosity, not pressure; no invented urgency.
 - CTA: ${verifiedContacts.length ? `use ONLY these verified contact details, verbatim: ${verifiedContacts.join("; ")}. No promises (free quote, response time, discounts) unless they are F* facts.` : "no verified contact details exist: use a neutral CTA without phone, email or promises."}
 - Keyword/location: the H1 must contain the primary keyword${context.meta.target_location ? ` and the target location (${context.meta.target_location})` : ""} naturally, in the output language.
 - Internal links: use markdown links to the exact URLs of L* candidates where they genuinely help the reader. Vary anchors; never repeat the same anchor excessively; do not link irrelevant pages.

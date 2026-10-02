@@ -9,7 +9,7 @@
 // publishing targets. Long waits (human approval) park the run; record hooks
 // enqueue triggers and the next worker tick resumes the same run.
 import { deriveSignals } from "./signals.js";
-import { decide, summarize, circuitGroup, localDate } from "./decide.js";
+import { decide, summarize, circuitGroup, localDate, verifiedTypesFrom } from "./decide.js";
 import { classifyError, retryable } from "./signals.js";
 const TEMPORARY_BLOCKS = new Set(["BUDGET_LIMIT", "PLAN_NOT_DUE", "PLAN_LIMIT"]);
 
@@ -289,7 +289,7 @@ export class Engine {
       opportunities.push({ id: o.id, strategy_version: o.strategy_version, opportunity_type: o.opportunity_type, recommended_page_type: o.recommended_page_type, existing_page: o.existing_page || "", recommended_url: o.recommended_url || "", title_suggestion: o.title_suggestion || "", priority: o.priority, status: o.status, confidence: o.confidence, keyword_text: kw?.keyword || "", intent: kw?.intent || "", target_location: kw?.target_location || "" });
     }
     const cannibal = lastVersion ? await this.all("cannibalization_issues", `website = "${wid}" && strategy_version = "${lastVersion.id}" && (status = "open" || status = "reviewed")`, { fields: "id,keyword_group" }) : [];
-    const facts = await this.all("business_facts", `website = "${wid}" && (verified = true || verification_state = "verified" || verification_state = "user_confirmed")`, { fields: "fact_type" });
+    const facts = await this.all("business_facts", `website = "${wid}" && (verified = true || verification_state = "verified" || verification_state = "user_confirmed")`, { fields: "fact_type,label,value" });
 
     const managedActs = await this.all("autopilot_actions", `website = "${wid}" && article != ""`, { fields: "article,action_type,status,created_at" });
     const managed = new Set(managedActs.filter((a) => a.action_type === "GENERATE_CONTENT").map((a) => a.article));
@@ -306,13 +306,18 @@ export class Engine {
     for (const a of arts) {
       let lastJob = null;
       if (a.status === "publish_failed") lastJob = await this.first("publish_jobs", `article = "${a.id}" && status = "failed"`, { sort: "-created_at", fields: "id,error_code" });
+      let blockedClaims = [];
+      if (a.status === "needs_revision" && a.fact_check_status === "blocked") {
+        const cl = await this.all("article_claims", `article = "${a.id}" && version = ${Number(a.current_version) || 0} && risk_level = "high" && (verification_status = "UNVERIFIED" || verification_status = "CONTRADICTED")`, { fields: "claim" });
+        blockedClaims = cl.map((c) => c.claim).filter(Boolean);
+      }
       const approvedAt = a.approved_at ? Date.parse(String(a.approved_at).replace(" ", "T")) : null;
       articles.push({
         ...a, managed: managed.has(a.id), approved_by_name: a.expand?.approved_by?.name || "",
         // Auto-publish only considers approvals made while the policy allowed it.
         approval_after_policy: Boolean(since !== null && approvedAt !== null && approvedAt >= since),
         publication: pubBy[a.id] || null, last_changed_at: lastChange[a.id] || pubBy[a.id]?.published_at || "",
-        last_publish_job: lastJob?.id || "", last_publish_error: lastJob?.error_code || "",
+        last_publish_job: lastJob?.id || "", last_publish_error: lastJob?.error_code || "", blocked_claims: blockedClaims,
       });
     }
     const gsc = await this.gscState(w);
@@ -324,7 +329,7 @@ export class Engine {
       crawl: { last_id: lastCrawl?.id || "", last_completed_at: lastCrawl?.completed_at || lastCrawl?.created_at || "", active: Boolean(activeCrawl), material_changes: material },
       strategy: { last_version_id: lastVersion?.id || "", last_generated_at: lastVersion?.generated_at || "", active: Boolean(activeStrategy) },
       technical: [...groups.values()], opportunities, cannibalization: cannibal.map((c) => ({ id: c.id, keyword_group: c.keyword_group, keyword_norm: normalize(c.keyword_group) })),
-      facts: { verified_types: new Set(facts.map((f) => f.fact_type)) }, articles: articles.map((a) => ({ ...a, eligible_for_auto_publish: a.managed && a.approval_after_policy })), revisionsByArticle: revisions,
+      facts: { verified_types: verifiedTypesFrom(facts) }, articles: articles.map((a) => ({ ...a, eligible_for_auto_publish: a.managed && a.approval_after_policy })), revisionsByArticle: revisions,
       gsc, analytics, circuits, usage: await this.usage(w.id), estimates: await this.estimates(w.organization), health: await this.health(),
     };
   }
@@ -530,7 +535,7 @@ export class Engine {
     }
     if (a.action_type === "NOTIFY_HUMAN") {
       const t = a.result?.planned?.task || {};
-      await this.task(run, { kind: t.kind || "human_review", title: t.title || "Autopilot needs your attention", body: a.error_message || a.result?.reason || "", evidence: a.result?.planned || {}, dedup_key: a.idempotency_key, run: run.id, action: a.id, link: t.link || (a.article ? `/articles/${a.article}` : `/websites/${run.website}/autopilot`), severity: t.kind === "integration_reconnect" || t.kind === "publishing_integration" ? "critical" : "warning" });
+      await this.task(run, { kind: t.kind || "human_review", title: t.title || "Autopilot needs your attention", body: a.error_message || a.result?.reason || "", evidence: a.result?.planned || {}, dedup_key: a.idempotency_key, run: run.id, action: a.id, link: t.link || (a.article ? `/review/${a.article}` : `/websites/${run.website}/autopilot`), severity: t.kind === "integration_reconnect" || t.kind === "publishing_integration" ? "critical" : "warning" });
       await this.transition("action", a.id, "completed", { completed_at: this.ts(), started_at: this.ts() });
       return { ok: true };
     }

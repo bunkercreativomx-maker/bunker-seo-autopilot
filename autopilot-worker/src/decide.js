@@ -52,6 +52,31 @@ export function autoPublishBlockers(a) {
   return b;
 }
 
+/** Same instruction the review screen's "Fix it for me" button sends. */
+export function autoFixInstruction(sentences) {
+  const lines = sentences.slice(0, 25).map((t) => `- ${String(t).slice(0, 220)}`).join("\n");
+  return [
+    "Fix ONLY what blocks publication. Rewrite or remove these sentences so they no longer state specific facts about this business",
+    "(its process, what it includes, what it asks for, timelines). Use general, educational wording (\"in general\", \"usually\", \"a good technician will…\") or drop them.",
+    "Keep the verified phone and email exactly as they are. Keep the same language as the article for title, SEO title and meta description.",
+    "Keep a clear, curiosity-driven invitation to contact the business (each case is different, call us and we'll review yours).",
+    lines ? `Sentences:\n${lines}` : "",
+  ].filter(Boolean).join(" ").slice(0, 1990);
+}
+
+/** Fact types a VERIFIED fact covers, including topics implied by its value ("Crédito nuevo" → financing). */
+export function verifiedTypesFrom(facts) {
+  const types = new Set();
+  for (const f of facts || []) {
+    if (f.fact_type) types.add(f.fact_type);
+    const v = `${f.label || ""} ${f.value || ""}`;
+    if (/^\s*NOT OFFERED/i.test(String(f.value || ""))) continue;
+    // price/promotion/warranty always need their own explicit fact type.
+    for (const t of FACT_TOPICS) if (["financing", "certification"].includes(t.type) && t.re.test(v)) types.add(t.type);
+  }
+  return types;
+}
+
 export function normalizeText(v) {
   return String(v ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9ñ]+/g, " ").trim();
 }
@@ -250,6 +275,12 @@ export function decide(signals, ctx) {
       out.push(decision({ signal: s, decision_type: "REQUEST_HUMAN_REVIEW", priority: a.high_risk ? "high" : "medium", rule: "article.awaiting_approval", requires_approval: true, risk_level: a.high_risk ? "high" : "low", reason: "Draft passed the Phase 4 pipeline and awaits human approval. Autopilot never approves content.", evidence: s.evidence }));
     } else if (a.status === "failed") {
       out.push(decision({ signal: s, decision_type: "REQUEST_HUMAN_REVIEW", priority: "medium", rule: "article.failed", requires_approval: true, reason: "The Phase 4 pipeline failed for this article; Autopilot does not add another retry layer. A human decides whether to retry.", evidence: s.evidence, planned_action: { action_type: "NOTIFY_HUMAN", target_type: "article", target_id: a.id, idempotency_key: `notify:failed:${a.id}:v${a.current_version}`, task: { kind: "human_review", title: `Content generation failed: ${a.title || a.primary_keyword}` } } }));
+    } else if (a.status === "needs_revision" && a.fact_check_status === "blocked" && a.managed && (ctx.revisionsByArticle?.[a.id] || 0) < Math.max(1, p.max_revision_jobs_per_article || 0)) {
+      // Self-fix: one automatic "Fix it for me" pass that rewrites ONLY the
+      // flagged sentences as general wording (or drops them). Never invents or
+      // verifies facts; if it still fails, a human reviews it.
+      const used = ctx.revisionsByArticle?.[a.id] || 0;
+      plan({ signal: s, decision_type: "RECHECK_ARTICLE", priority: "medium", score: 45, rule: "article.fact_failure.autofix", reason: `Fact check BLOCKED: automatic fix ${used + 1} rewrites only the flagged sentences as general wording (no facts invented).`, evidence: { ...s.evidence, revisions_used: used, flagged: (a.blocked_claims || []).length } }, { action_type: "REQUEST_REVISION", target_type: "article", target_id: a.id, idempotency_key: `revision:${a.id}:v${a.current_version}:${used + 1}`, instruction: autoFixInstruction(a.blocked_claims || []) });
     } else if (a.status === "needs_revision" && a.fact_check_status === "blocked" && p.pause_on_fact_failure) {
       out.push(decision({ signal: s, decision_type: "REQUEST_HUMAN_REVIEW", priority: "high", rule: "article.fact_failure", requires_approval: true, reason: "Fact check is BLOCKED (unsupported/contradicted high-risk claims). pause_on_fact_failure: no automatic revision; a human must review the claims or business facts.", evidence: s.evidence, planned_action: { action_type: "NOTIFY_HUMAN", target_type: "article", target_id: a.id, idempotency_key: `notify:factfail:${a.id}:v${a.current_version}`, task: { kind: "missing_facts", title: `Fact check blocked: ${a.title || a.primary_keyword}` } } }));
     } else if (a.status === "needs_revision") {

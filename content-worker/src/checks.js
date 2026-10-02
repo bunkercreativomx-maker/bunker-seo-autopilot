@@ -139,7 +139,12 @@ export function enforceClaim(claim, proposal, evidence, { brandTerms = [] } = {}
     source = "research_source";
   } else {
     status = "UNVERIFIED";
-    risk = highRiskTopic ? "high" : "medium";
+    // Impersonal, educational statements ("technicians check refrigerant
+    // pressures", "a quote usually includes…") are not promises about this
+    // business. They stay UNVERIFIED (shown to the human, no auto-publish) but
+    // only block when they carry hard specifics: numbers, statistics, medical
+    // claims, prices/promotions/guarantees.
+    risk = highRiskTopic && isHardSpecific(claim) ? "high" : "medium";
   }
   const blocking = status === "CONTRADICTED" || (status === "UNVERIFIED" && risk === "high");
   let action = proposal?.action || "approve";
@@ -160,6 +165,15 @@ export function enforceClaim(claim, proposal, evidence, { brandTerms = [] } = {}
     suggested_rewrite: proposal?.suggested_rewrite || "",
     notes: notes.filter(Boolean).join(" ").slice(0, 2000),
   };
+}
+
+const HARD_TOPICS = new Set(["statistic", "medical", "price", "promotion", "guarantee", "warranty", "certification", "credential"]);
+/** A non-business claim that would be a factual risk if wrong (numbers, stats, medical, prices…). */
+export function isHardSpecific(claim) {
+  if (!claim) return false;
+  if (/\d/.test(String(claim.claim || ""))) return true;
+  if (claim.claim_type === "statistic" || claim.claim_type === "medical") return true;
+  return HARD_TOPICS.has(claim.sensitive_topic || "none");
 }
 
 const STABLE_KNOWLEDGE_TYPES = new Set(["general", "product", "external"]);

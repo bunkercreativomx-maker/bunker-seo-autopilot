@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { autoPublishBlockers, decide, summarize, gate, budgetCheck, missingFacts, scoreOpportunity, circuitGroup, normalizeUrl } from "../src/decide.js";
+import { autoPublishBlockers, decide, summarize, gate, budgetCheck, missingFacts, scoreOpportunity, circuitGroup, normalizeUrl, verifiedTypesFrom } from "../src/decide.js";
 import { deriveSignals, performanceSignals, classifyError, retryable } from "../src/signals.js";
 
 const NOW = Date.parse("2026-09-25T12:00:00Z");
@@ -161,8 +161,23 @@ test("needs_revision uses policy revision budget, then human review", () => {
   assert.ok(!d.some((x) => x.planned_action?.action_type === "REQUEST_REVISION"));
 });
 
-test("fact-check blocked + pause_on_fact_failure → human review, no revision", () => {
-  const d = run(ctx({ articles: [{ id: "ar1", managed: true, status: "needs_revision", current_version: 2, fact_check_status: "blocked" }] }));
+test("fact-check blocked → one automatic fix with the flagged sentences", () => {
+  const d = run(ctx({ articles: [{ id: "ar1", managed: true, status: "needs_revision", current_version: 2, fact_check_status: "blocked", blocked_claims: ["Technicians check refrigerant pressures."] }] }));
+  const r = d.find((x) => x.planned_action?.action_type === "REQUEST_REVISION");
+  assert.ok(r && r.rule === "article.fact_failure.autofix");
+  assert.match(r.planned_action.instruction, /refrigerant pressures/);
+});
+
+test("verified service \"Crédito nuevo\" covers financing; price still needs its own fact", () => {
+  const v = verifiedTypesFrom([{ fact_type: "service", value: "Crédito nuevo" }, { fact_type: "other", value: "NOT OFFERED: certificado X" }]);
+  assert.ok(v.has("financing"));
+  assert.ok(!v.has("certification"));
+  assert.deepEqual(missingFacts("crédito para pensionados", v), []);
+  assert.deepEqual(missingFacts("precio del crédito", v), ["price"]);
+});
+
+test("fact-check blocked after the automatic fix + pause_on_fact_failure → human review, no revision", () => {
+  const d = run(ctx({ revisionsByArticle: { ar1: 1 }, articles: [{ id: "ar1", managed: true, status: "needs_revision", current_version: 2, fact_check_status: "blocked" }] }));
   assert.ok(d.some((x) => x.rule === "article.fact_failure"));
   assert.ok(!d.some((x) => x.planned_action?.action_type === "REQUEST_REVISION"));
 });
