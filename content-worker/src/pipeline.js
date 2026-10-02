@@ -176,7 +176,11 @@ export async function processContentJob(pb, job, deps) {
         research = await runResearchAnalysis(ctx, context);
         const requireExternal = Boolean(job.configuration?.require_external_research);
         const noExternal = context.external_sources.length === 0;
-        const researchRequired = noExternal && (requireExternal || research.time_sensitive || research.research_sufficiency === "insufficient");
+        // Commercial pages for a business with verified facts are written from
+        // those facts; unsupported specifics (rates, amounts) are omitted by the
+        // writer rules, so missing external sources is not a reason to stop.
+        const commercialWithFacts = ["service_page", "location_page", "existing_page_optimization"].includes(article.content_type) && (context.verified_facts || []).length >= 3;
+        const researchRequired = noExternal && (requireExternal || (!commercialWithFacts && (research.time_sensitive || research.research_sufficiency === "insufficient")));
         const researchRecord = {
           organization: article.organization, client: article.client, website: article.website, article: article.id,
           search_intent: research.search_intent, audience: research.audience, questions: research.questions,
