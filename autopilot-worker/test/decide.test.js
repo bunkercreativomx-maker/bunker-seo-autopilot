@@ -395,3 +395,10 @@ test("monthly packages: budget gate applies the plan to GENERATE_CONTENT only", 
   assert.equal(budgetCheck("GENERATE_CONTENT", ctx, []).code, "PLAN_NOT_DUE");
   assert.equal(budgetCheck("PUBLISH", ctx, []), null);
 });
+
+test("failed managed article → one automatic retry, then human", () => {
+  const d = run(ctx({ articles: [{ id: "ar9", managed: true, status: "failed", current_version: 0 }] }));
+  assert.ok(d.some((x) => x.rule === "article.failed.retry" && x.planned_action?.action_type === "REQUEST_REVISION"));
+  const d2 = run(ctx({ revisionsByArticle: { ar9: 1 }, articles: [{ id: "ar9", managed: true, status: "failed", current_version: 0 }] }));
+  assert.ok(d2.some((x) => x.rule === "article.failed"));
+});
