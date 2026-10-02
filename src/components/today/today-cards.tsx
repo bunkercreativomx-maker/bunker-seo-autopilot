@@ -74,7 +74,18 @@ export function ReadyCard({ post }: { post: TodayPost }) {
 /** Switch that submits its NEXT value (no hidden-state race). */
 function Toggle({ name, checked, onChange, disabled }: { name: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <button type="submit" name={name} value={checked ? "off" : "on"} role="switch" aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)}
+    // The new value is written into a dedicated field and submitted in the same
+    // tick. (A submit button whose value flips on re-render sent the OLD value:
+    // switching ON saved OFF.)
+    <button type="button" role="switch" aria-checked={checked} disabled={disabled}
+      onClick={(e) => {
+        const form = e.currentTarget.form;
+        const next = !checked;
+        const field = form?.querySelector<HTMLInputElement>(`input[data-toggle="${name}"]`);
+        if (field) field.value = next ? "on" : "off";
+        onChange(next);
+        form?.requestSubmit();
+      }}
       className={cn("relative inline-flex h-6 w-11 shrink-0 rounded-full transition", checked ? "bg-emerald-500" : "bg-slate-300", disabled && "opacity-40")}>
       <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition", checked ? "left-[22px]" : "left-0.5")} />
     </button>
@@ -102,6 +113,7 @@ export function SiteRow({ site, canEdit }: { site: TodaySite; canEdit: boolean }
         <input type="hidden" name="websiteId" value={site.id} />
         <input type="hidden" name="autopublish" value={auto ? "on" : "off"} />
         <input type="hidden" name="posts" value={posts} />
+        <input type="hidden" name="daily" data-toggle="daily" defaultValue={daily ? "on" : "off"} />
         <span className="text-xs text-slate-600">Posting</span>
         <Toggle name="daily" checked={daily} disabled={!canEdit || save.pending} onChange={setDaily} />
       </form>
@@ -110,6 +122,7 @@ export function SiteRow({ site, canEdit }: { site: TodaySite; canEdit: boolean }
           <input type="hidden" name="websiteId" value={site.id} />
           <input type="hidden" name="daily" value="on" />
           <input type="hidden" name="posts" value={posts} />
+          <input type="hidden" name="autopublish" data-toggle="autopublish" defaultValue={auto ? "on" : "off"} />
           <span className="text-xs text-slate-600">Auto-publish safe posts</span>
           <Toggle name="autopublish" checked={auto} disabled={!canEdit || save.pending || !site.connected} onChange={setAuto} />
         </form>
