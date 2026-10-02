@@ -137,6 +137,13 @@ export function enforceClaim(claim, proposal, evidence, { brandTerms = [] } = {}
     risk = highRiskTopic ? "medium" : "low";
     sourceId = known.find((id) => evidence.get(id).category === "external");
     source = "research_source";
+  } else if (!isHardSpecific(claim) && !["legal", "medical", "financial", "statistic"].includes(claim.claim_type) && !["legal", "medical", "financing", "statistic"].includes(claim.sensitive_topic || "none")) {
+    // Impersonal how-it-works wording with no numbers and no business promise
+    // ("technicians check refrigerant pressures", "a quote usually lists the
+    // components"): general educational knowledge, not a fact about THIS business.
+    status = "NOT_REQUIRED";
+    risk = "low";
+    notes.push("General educational wording (no numbers, no business promise).");
   } else {
     status = "UNVERIFIED";
     // Impersonal, educational statements ("technicians check refrigerant
@@ -240,11 +247,22 @@ export function classifyQaCheck(check, context) {
  * High-risk status of the CURRENT version, from its claims and copy only
  * (research-stage risk categories describe the topic, not this text).
  */
-export function currentRisk(content, claims) {
-  const byClaims = new Set(claims.filter((c) => c.verification_status !== "NOT_REQUIRED" && ["medical", "legal", "financial"].includes(c.claim_type)).map((c) => c.claim_type));
+export function currentRisk(content, claims, { verifiedFacts = [] } = {}) {
+  // Sensitive = a medical/legal/financial claim nobody could back (UNVERIFIED /
+  // CONTRADICTED) or any high-risk claim. Words alone ("crédito" on a credit
+  // business, "regulation" in an HVAC post) are kept as copy_hits for the
+  // reviewer but no longer hold a post back.
+  const byClaims = new Set(claims.filter((c) => ["UNVERIFIED", "CONTRADICTED"].includes(c.verification_status) && ["medical", "legal", "financial"].includes(c.claim_type)).map((c) => c.claim_type));
   const highClaims = claims.filter((c) => c.risk_level === "high").length;
   const copy = detectRisk([content]);
-  const categories = [...new Set([...byClaims, ...copy.categories])];
+  // Copy words still flag, except the category the business itself is verified
+  // for (a credit company talking about "crédito" is its product, not a risk).
+  const own = new Set();
+  for (const f of verifiedFacts) {
+    if (String(f.value || "").startsWith("NOT OFFERED") || !["service", "product", "business_name"].includes(f.type)) continue;
+    for (const c of detectRisk([`${f.label || ""} ${f.value || ""}`]).categories) own.add(c);
+  }
+  const categories = [...new Set([...byClaims, ...copy.categories.filter((c) => !own.has(c) && c !== "regulated" && c !== "safety")])];
   return { high_risk: highClaims > 0 || categories.length > 0, categories, high_risk_claims: highClaims, copy_hits: copy.hits };
 }
 

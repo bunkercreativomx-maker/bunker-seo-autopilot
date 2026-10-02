@@ -316,7 +316,7 @@ export async function processContentJob(pb, job, deps) {
       const outbound = commercial ? externalLinks(content, context.meta.website_domain) : [];
       // High-risk reflects the CURRENT version's claims and copy; the
       // research-stage topic categories are kept separately for audit.
-      const risk = currentRisk(content, claims);
+      const risk = currentRisk(content, claims, { verifiedFacts: context.verified_facts });
 
       await progress("quality_review");
       const structure = structureStats(content, context);
@@ -428,7 +428,7 @@ export async function reassessArticle(pb, articleId, { now = () => new Date().to
   const blockerChecks = checks.filter((c) => c.classification === "BLOCKER").length;
   const status = blocking || counts.BLOCKER || blockerChecks ? "BLOCKED"
     : counts.MAJOR_ADVISORY || checks.some((c) => c.classification === "MAJOR_ADVISORY") || unverified ? "NEEDS_REVISION" : "PASS";
-  const risk = currentRisk(article.content, claims);
+  const risk = currentRisk(article.content, claims, { verifiedFacts: context.verified_facts });
   const flags = new Set((article.flags || []).filter((f) => f !== "HIGH_RISK_REVIEW_REQUIRED"));
   if (risk.high_risk) flags.add("HIGH_RISK_REVIEW_REQUIRED");
   if (!claims.some((c) => ["business", "product"].includes(c.claim_type) && c.verification_status === "UNVERIFIED")) flags.delete("UNSUPPORTED_BUSINESS_CLAIM");

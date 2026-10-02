@@ -131,8 +131,11 @@ test("impersonal educational sentences are not business claims just because the 
 test("impersonal educational claim on a sensitive topic does not block; numbers still block", () => {
   const ev = new Map();
   const soft = enforceClaim({ claim: "Technicians check refrigerant pressures and look for leaks.", claim_type: "general", business_specific: false, sensitive_topic: "safety" }, { verification_status: "UNVERIFIED", evidence_ids: [] }, ev);
-  assert.equal(soft.verification_status, "UNVERIFIED");
+  assert.equal(soft.verification_status, "NOT_REQUIRED");
   assert.equal(soft.blocking, false);
+  const legal = enforceClaim({ claim: "La distribuidora define los requisitos de interconexión.", claim_type: "legal", business_specific: false, sensitive_topic: "legal" }, { verification_status: "UNVERIFIED", evidence_ids: [] }, ev);
+  assert.equal(legal.verification_status, "UNVERIFIED");
+  assert.equal(legal.blocking, false);
   const hard = enforceClaim({ claim: "Systems pay back in 5 years.", claim_type: "financial", business_specific: false, sensitive_topic: "financing" }, { verification_status: "UNVERIFIED", evidence_ids: [] }, ev);
   assert.equal(hard.blocking, true);
 });

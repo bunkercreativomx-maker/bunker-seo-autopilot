@@ -32,6 +32,8 @@ test("high-risk flag reflects CURRENT claims/copy: all-low v10 clears it; a curr
   const withHigh = [...claims, { claim: "Existen incentivos fiscales", claim_type: "financial", verification_status: "UNVERIFIED", risk_level: "high" }];
   assert.equal(currentRisk(v10, withHigh).high_risk, true);
   assert.equal(currentRisk(`${v10}\n\nOfrecemos financiamiento sin intereses.`, claims).high_risk, true, "risky copy still flags");
+  // a credit business talking about its own verified product is not "sensitive"
+  assert.equal(currentRisk(`${v10}\n\nTramita tu crédito vía nómina.`, claims, { verifiedFacts: [{ type: "product", value: "Crédito vía nómina" }] }).high_risk, false);
 });
 
 test("QA advisory calibration: requests needing unverified evidence are NOT_APPLICABLE", () => {
