@@ -11,6 +11,7 @@
 import { deriveSignals } from "./signals.js";
 import { decide, summarize, circuitGroup, localDate } from "./decide.js";
 import { classifyError, retryable } from "./signals.js";
+const TEMPORARY_BLOCKS = new Set(["BUDGET_LIMIT", "PLAN_NOT_DUE", "PLAN_LIMIT"]);
 
 export const WORKER_VERSION = "bunker-seo-autopilot/0.7.0";
 export const MAX_CYCLES_PER_RUN = 20;
@@ -480,7 +481,14 @@ export class Engine {
     const pa = d.planned_action;
     const key = pa.idempotency_key;
     const prior = await this.all("autopilot_actions", `idempotency_key = "${esc(key)}"`, { sort: "-created_at" });
-    const live = prior.find((x) => !["failed", "cancelled", "skipped"].includes(x.status));
+    let live = prior.find((x) => !["failed", "cancelled", "skipped"].includes(x.status));
+    // A temporary policy block (daily/weekly budget, package not due yet) must not pin the
+    // idempotency key forever: once today's decision is no longer blocked, retire the old
+    // blocked action (skipped frees the unique index) and plan a fresh one.
+    if (live && live.status === "blocked" && TEMPORARY_BLOCKS.has(live.error_code) && !d.block_code) {
+      await this.col("autopilot_actions").update(live.id, { status: "skipped", error_message: `${live.error_message || ""} — superseded: limit cleared on ${this.ts().slice(0, 10)}`.slice(0, 1000), updated_at: this.ts() }, { requestKey: null });
+      live = null;
+    }
     if (live) return { action: live, reused: true };
     const recommended = observe && prior.find((x) => x.status === "skipped" && x.error_code === "OBSERVE_MODE");
     if (recommended) return { action: recommended, reused: true };
