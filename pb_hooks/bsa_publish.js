@@ -287,7 +287,9 @@ function blockersFor(article, website, integration, operation) {
       if (snapshotHash(snapshotOf(article)) !== article.approved_hash) b.push("Content changed after approval; re-approval required.");
       if (snapshotHash(article.approved_snapshot) !== article.approved_hash) b.push("Approved snapshot integrity check failed.");
     }
-    if (article.fact_check_status !== "passed") b.push("Fact check has not passed on the approved version.");
+    // Same rule as approval: "issues" (unconfirmed sentences the human read and
+    // acknowledged when approving) may publish; only blocked/stale/pending stop it.
+    if (["passed", "issues"].indexOf(article.fact_check_status) === -1) b.push("Fact check has not passed on the approved version (" + (article.fact_check_status || "pending") + ").");
     if (article.qa_status === "BLOCKED" || article.qa_status === "stale" || article.qa_status === "pending") b.push("QA is " + article.qa_status + ".");
     if (flags.indexOf("RESEARCH_REQUIRED") !== -1) b.push("Research is required for this topic.");
     if (flags.indexOf("LANGUAGE_MISMATCH") !== -1) b.push("Language mismatch.");

@@ -83,7 +83,8 @@ export function lockedSnapshot(job, article, rollbackSnapshot) {
   if (article.approved_hash !== job.version_hash || Number(article.approved_version) !== Number(job.article_version)) throw new PublishError("REAPPROVAL_REQUIRED", "The approved version changed after the job was queued");
   if (snapshotHash(article.approved_snapshot) !== article.approved_hash) throw new PublishError("INTEGRITY", "Approved snapshot failed its integrity check");
   if (Number(article.current_version) !== Number(article.approved_version) || snapshotHash(snapshotOf(article)) !== article.approved_hash) throw new PublishError("REAPPROVAL_REQUIRED", "Content changed after approval; re-approval required");
-  if (article.fact_check_status !== "passed") throw new PublishError("NOT_APPROVED", "Fact check has not passed");
+  // "issues" = unconfirmed, non-blocking sentences the human read when approving.
+  if (!["passed", "issues"].includes(article.fact_check_status)) throw new PublishError("NOT_APPROVED", "Fact check has not passed");
   if (article.high_risk && !job.acknowledge_high_risk) throw new PublishError("HIGH_RISK_REVIEW_REQUIRED", "High-risk content requires acknowledgement");
   return article.approved_snapshot;
 }
