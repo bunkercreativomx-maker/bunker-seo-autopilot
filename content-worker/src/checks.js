@@ -70,7 +70,7 @@ export function factSupportsClaim(claimText, fact) {
   if (!fact) return false;
   const text = String(claimText || "");
   const factText = `${fact.label || ""} ${fact.value || ""}`;
-  const claimDigits = (text.match(/\d[\d\s.-]{6,}\d/g) || []).map((d) => d.replace(/\D/g, ""));
+  const claimDigits = (text.match(/\d[\d\s.()+-]{6,}\d/g) || []).map((d) => d.replace(/\D/g, ""));
   const factDigits = String(fact.value || "").replace(/\D/g, "");
   if (["phone", "whatsapp"].includes(fact.type)) return claimDigits.some((d) => d.length >= 8 && factDigits.endsWith(d.slice(-8)));
   if (fact.type === "email") return normalizeForMatch(text).includes(normalizeForMatch(fact.value));
@@ -84,9 +84,35 @@ export function factSupportsClaim(claimText, fact) {
   return [...stems(text)].some((s) => factStems.has(s));
 }
 
-export function enforceClaim(claim, proposal, evidence, { brandTerms = [] } = {}) {
-  const known = (proposal?.evidence_ids || []).filter((id) => evidence.has(id));
-  const invalidRefs = (proposal?.evidence_ids || []).filter((id) => !evidence.has(id));
+// Promises of time, speed, scope or outcome are never covered by a generic service fact.
+const COMMITMENT = /\b(menos de|mas de|hasta|horas?|dias?|semanas?|mismo dia|inmediat\w*|rapid\w*|siempre|nunca|todos? los|24|garantiz\w*|asegur\w*|mejor\w*|unic\w*|lider\w*|within|hours?|days?|weeks?|same day|fast\w*|always|never|best|only|leading|guarantee\w*|ensure\w*)\b/;
+
+function commitmentBeyondFact(claimText, fact) {
+  const factNorm = normalizeForMatch(`${fact?.label || ""} ${fact?.value || ""}`);
+  return [...normalizeForMatch(claimText).matchAll(new RegExp(COMMITMENT.source, "g"))].some((m) => !factNorm.includes(m[0]));
+}
+
+/** "Visit https://own-domain/x" style sentence: only own-domain URLs, no business topic, no other numbers. */
+export function isOwnSitePointer(text, domain) {
+  const raw = String(text || "");
+  const host = String(domain || "").toLowerCase().replace(/^www\./, "");
+  if (!host) return false;
+  const urls = raw.match(/https?:\/\/[^\s)\]>"']+/gi) || [];
+  if (!urls.length) return false;
+  if (!urls.every((u) => { try { return new URL(u).hostname.toLowerCase().replace(/^www\./, "") === host; } catch { return false; } })) return false;
+  const rest = raw.replace(/https?:\/\/[^\s)\]>"']+/gi, " ");
+  if (/\d/.test(rest)) return false;
+  return topicsIn(rest).length === 0;
+}
+
+export function enforceClaim(claim, proposal, evidence, { brandTerms = [], ownDomain = "" } = {}) {
+  // The fact checker sometimes cites the database record id instead of the
+  // F*/U*/C* ref: resolve those to the matching evidence entry.
+  const byRecord = new Map();
+  for (const [ref, ev] of evidence) for (const rid of [ev.item?.record_id, ev.item?.page_id]) if (rid && !byRecord.has(rid)) byRecord.set(rid, ref);
+  const cited = (proposal?.evidence_ids || []).map((id) => (evidence.has(id) ? id : byRecord.get(id) || id));
+  const known = [...new Set(cited.filter((id) => evidence.has(id)))];
+  const invalidRefs = cited.filter((id) => !evidence.has(id));
   const categories = new Set(known.map((id) => evidence.get(id).category));
   const business = isBusinessClaim(claim, { brandTerms }) || claim.claim_type === "product" && topicsIn(claim.claim).length > 0;
   const highRiskTopic = HIGH_RISK_TYPES.has(claim.claim_type) || ["statistic", "medical", "legal", "safety", "financing"].includes(claim.sensitive_topic);
@@ -121,7 +147,23 @@ export function enforceClaim(claim, proposal, evidence, { brandTerms = [] } = {}
       }
       if (matching.length && !known.includes(matching[0])) known.push(matching[0]);
     }
-    if (matching.length) {
+    // Same for the business's own verified services / area / products: the
+    // fact matcher (topics + numbers + shared stems) decides, not the citation.
+    if (!matching.length) {
+      for (const [id, ev] of evidence) {
+        if (ev.category === "verified_fact" && !commitmentBeyondFact(claim.claim, ev.item) && factSupportsClaim(claim.claim, ev.item)) { matching = [id]; break; }
+      }
+      if (matching.length && !known.includes(matching[0])) known.push(matching[0]);
+    }
+    // A pointer to the business's OWN website (home, service page, blog) is
+    // a link, not a promise: it is true by construction when the URL is on the
+    // client's verified domain and the sentence carries no topic or number.
+    if (!matching.length && ownDomain && isOwnSitePointer(claim.claim, ownDomain)) {
+      status = "VERIFIED"; risk = "low"; source = "own_website";
+    }
+    if (status === "VERIFIED") {
+      notes.push("Link to the business's own website.");
+    } else if (matching.length) {
       status = "VERIFIED";
       risk = "low";
       sourceId = matching[0];
@@ -480,7 +522,10 @@ function stripLocation(text, location) {
 export function localDifferentiation(markdown, context) {
   const location = context.meta.target_location;
   if (context.meta.content_type !== "location_page") return { applicable: false, level: "none" };
-  const locTokens = tokens(location).filter((t) => t.length > 2);
+  // Match on the city ("El Paso"), not the full "El Paso, Texas" string: facts
+  // and pages rarely repeat the state, which made real local evidence invisible.
+  const city = String(location || "").split(",")[0];
+  const locTokens = tokens(city).filter((t) => t.length > 2);
   const mentions = (text) => locTokens.length > 0 && locTokens.every((t) => tokens(text).includes(t));
   const localEvidence = [];
   for (const fact of context.verified_facts) if (mentions(`${fact.label} ${fact.value}`)) localEvidence.push(fact.id);

@@ -304,7 +304,7 @@ export async function processContentJob(pb, job, deps) {
       const evidence = evidenceIndex(context);
       const byIndex = new Map(checked.map((r) => [r.claim_index, r]));
       const brandTerms = [context.meta.business_name, String(context.meta.website_domain || "").split(".")[0]].filter(Boolean);
-      const claims = extracted.map((claim, index) => enforceClaim(claim, byIndex.get(index), evidence, { brandTerms }));
+      const claims = extracted.map((claim, index) => enforceClaim(claim, byIndex.get(index), evidence, { brandTerms, ownDomain: context.meta.website_domain }));
       const idToRecord = new Map([...context.verified_facts, ...context.external_sources, ...context.crawler_evidence, ...context.unverified_data].map((e) => [e.id, e.record_id || e.page_id || ""]));
       await replaceForVersion(pb, "article_claims", article, article.current_version, claims.map((c) => ({
         claim: c.claim, claim_type: c.claim_type, source: c.source, source_id: idToRecord.get(c.source_id) || "",

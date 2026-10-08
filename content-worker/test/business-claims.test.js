@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildContext, evidenceIndex } from "../src/context.js";
-import { enforceClaim, factSupportsClaim, isBusinessClaim, isNonClaimText, scanUnverifiedBusinessMentions } from "../src/checks.js";
+import { localDifferentiation, enforceClaim, factSupportsClaim, isBusinessClaim, isNonClaimText, isOwnSitePointer, scanUnverifiedBusinessMentions } from "../src/checks.js";
 
 const T = { organization: "org1", client: "cliA", website: "webA" };
 function data() {
@@ -138,4 +138,37 @@ test("impersonal educational claim on a sensitive topic does not block; numbers 
   assert.equal(legal.blocking, false);
   const hard = enforceClaim({ claim: "Systems pay back in 5 years.", claim_type: "financial", business_specific: false, sensitive_topic: "financing" }, { verification_status: "UNVERIFIED", evidence_ids: [] }, ev);
   assert.equal(hard.blocking, true);
+});
+
+test("links to the business's own site, formatted phones and uncited verified services are verified", () => {
+  const own = { brandTerms, ownDomain: "tlalocsolfuturo.com" };
+  for (const text of ["Sitio web de Tlaloc Solfuturo: https://tlalocsolfuturo.com/.", "Tenemos un blog en https://www.tlalocsolfuturo.com/blog.", "Visita https://tlalocsolfuturo.com/about para conocernos."]) {
+    const r = enforceClaim({ claim: text, claim_type: "business", business_specific: true, sensitive_topic: "none" }, { verification_status: "UNVERIFIED", evidence_ids: [] }, idx, own);
+    assert.equal(r.verification_status, "VERIFIED", text);
+    assert.equal(r.blocking, false);
+  }
+  assert.equal(isOwnSitePointer("Garantía de por vida: https://tlalocsolfuturo.com/garantia", "tlalocsolfuturo.com"), false);
+  assert.equal(isOwnSitePointer("Mira https://otro.com/", "tlalocsolfuturo.com"), false);
+  assert.equal(isOwnSitePointer("Más de 500 proyectos en https://tlalocsolfuturo.com/", "tlalocsolfuturo.com"), false);
+  const phone = enforceClaim({ claim: "Llámanos al +52 (656) 695-3960.", claim_type: "business", business_specific: true, sensitive_topic: "contact" }, { verification_status: "UNVERIFIED", evidence_ids: [] }, idx, own);
+  assert.equal(phone.verification_status, "VERIFIED");
+  const svc = enforceClaim({ claim: "Tlaloc Solfuturo realiza la instalación solar residencial en Ciudad Juárez.", claim_type: "business", business_specific: true, sensitive_topic: "none" }, { verification_status: "UNVERIFIED", evidence_ids: [] }, idx, own);
+  assert.equal(svc.verification_status, "VERIFIED");
+  const maint = enforceClaim({ claim: "Tlaloc Solfuturo ofrece mantenimiento.", claim_type: "business", business_specific: true, sensitive_topic: "none" }, { verification_status: "UNVERIFIED", evidence_ids: [] }, idx, own);
+  assert.equal(maint.blocking, true);
+});
+
+test("fact checker citing the DB record id still verifies; uncited exact verified facts match", () => {
+  const own = { brandTerms, ownDomain: "tlalocsolfuturo.com" };
+  const r = enforceClaim({ claim: "Instalamos sistemas solares residenciales y comerciales.", claim_type: "business", business_specific: true, sensitive_topic: "none" }, { verification_status: "VERIFIED", evidence_ids: ["f4"] }, idx, own);
+  assert.equal(r.verification_status, "VERIFIED");
+  assert.doesNotMatch(r.notes, /unknown evidence/);
+  const promise = enforceClaim({ claim: "Instalamos sistemas solares residenciales en menos de 24 horas.", claim_type: "business", business_specific: true, sensitive_topic: "none" }, { verification_status: "UNVERIFIED", evidence_ids: [] }, idx, own);
+  assert.equal(promise.blocking, true);
+});
+
+test("local evidence matches the city even when facts omit the state", () => {
+  const c = { meta: { content_type: "location_page", target_location: "Ciudad Juárez, Chihuahua" }, verified_facts: ctx.verified_facts, crawler_evidence: [{ id: "C1", title: "Inicio", h1: "Solar", text: "Instalaciones en Ciudad Juárez" }], external_sources: [], other_articles: [] };
+  const r = localDifferentiation("# x", c);
+  assert.ok(r.local_evidence.length >= 2, JSON.stringify(r));
 });

@@ -30,6 +30,12 @@ const GENERATE_TYPES = ["create", "service", "location", "expand", "optimize", "
 // that is not a known harmless SEO advisory keeps the post for a human.
 export const AUTO_PUBLISH_MIN_SCORE = 85;
 export const HARMLESS_FLAGS = new Set(["RESEARCH_LIMITED", "META_DESCRIPTION_LENGTH", "SEO_TITLE_LENGTH", "SEO_TITLE_KEYWORD", "SLUG_FORMAT", "MINOR_ADVISORY", "NOT_REQUIRED", "NOT_APPLICABLE"]);
+// Provider outages (no credits / 429 / 5xx) don't consume the automatic fix;
+// each outage retry gets a fresh idempotency key, capped at 3.
+const MAX_OUTAGE_RETRIES = 3;
+function retrySuffix(ctx, a) { const n = ctx.revisionFailuresByArticle?.[a.id] || 0; return n ? `:r${n}` : ""; }
+function outageRetriesLeft(ctx, a) { return (ctx.revisionFailuresByArticle?.[a.id] || 0) < MAX_OUTAGE_RETRIES; }
+
 export function qaScoreOf(a) {
   const r = a?.qa_score;
   const n = typeof r === "number" ? r : r && typeof r === "object" && typeof r.score === "number" ? r.score : null;
@@ -273,17 +279,17 @@ export function decide(signals, ctx) {
       out.push(decision({ signal: s, decision_type: "REQUEST_HUMAN_REVIEW", priority: a.high_risk ? "high" : "medium", rule: "publish.auto_safe.held", requires_approval: true, risk_level: a.high_risk ? "high" : "low", reason: `Not safe to auto-publish (${[...why, ...(envOk ? [] : ["environment not allowed"]), ...(ctx.website.connection_status === "connected" ? [] : ["website not connected"])].join("; ")}). Waiting for a human.`, evidence: s.evidence }));
     } else if (a.status === "awaiting_approval") {
       out.push(decision({ signal: s, decision_type: "REQUEST_HUMAN_REVIEW", priority: a.high_risk ? "high" : "medium", rule: "article.awaiting_approval", requires_approval: true, risk_level: a.high_risk ? "high" : "low", reason: "Draft passed the Phase 4 pipeline and awaits human approval. Autopilot never approves content.", evidence: s.evidence }));
-    } else if (a.status === "failed" && a.managed && (ctx.revisionsByArticle?.[a.id] || 0) < Math.max(1, p.max_revision_jobs_per_article || 0)) {
+    } else if (a.status === "failed" && a.managed && (ctx.revisionsByArticle?.[a.id] || 0) < Math.max(1, p.max_revision_jobs_per_article || 0) && outageRetriesLeft(ctx, a)) {
       const used = ctx.revisionsByArticle?.[a.id] || 0;
-      plan({ signal: s, decision_type: "RECHECK_ARTICLE", priority: "medium", score: 40, rule: "article.failed.retry", reason: `Generation failed; automatic retry ${used + 1} from where it stopped.`, evidence: { ...s.evidence, revisions_used: used } }, { action_type: "REQUEST_REVISION", target_type: "article", target_id: a.id, idempotency_key: `retry:${a.id}:v${a.current_version}:${used + 1}` });
+      plan({ signal: s, decision_type: "RECHECK_ARTICLE", priority: "medium", score: 40, rule: "article.failed.retry", reason: `Generation failed; automatic retry ${used + 1} from where it stopped.`, evidence: { ...s.evidence, revisions_used: used } }, { action_type: "REQUEST_REVISION", target_type: "article", target_id: a.id, idempotency_key: `retry:${a.id}:v${a.current_version}:${used + 1}${retrySuffix(ctx, a)}` });
     } else if (a.status === "failed") {
       out.push(decision({ signal: s, decision_type: "REQUEST_HUMAN_REVIEW", priority: "medium", rule: "article.failed", requires_approval: true, reason: "The Phase 4 pipeline failed for this article; Autopilot does not add another retry layer. A human decides whether to retry.", evidence: s.evidence, planned_action: { action_type: "NOTIFY_HUMAN", target_type: "article", target_id: a.id, idempotency_key: `notify:failed:${a.id}:v${a.current_version}`, task: { kind: "human_review", title: `Content generation failed: ${a.title || a.primary_keyword}` } } }));
-    } else if (a.status === "needs_revision" && a.fact_check_status === "blocked" && a.managed && (ctx.revisionsByArticle?.[a.id] || 0) < Math.max(1, p.max_revision_jobs_per_article || 0)) {
+    } else if (a.status === "needs_revision" && a.fact_check_status === "blocked" && a.managed && (ctx.revisionsByArticle?.[a.id] || 0) < Math.max(1, p.max_revision_jobs_per_article || 0) && outageRetriesLeft(ctx, a)) {
       // Self-fix: one automatic "Fix it for me" pass that rewrites ONLY the
       // flagged sentences as general wording (or drops them). Never invents or
       // verifies facts; if it still fails, a human reviews it.
       const used = ctx.revisionsByArticle?.[a.id] || 0;
-      plan({ signal: s, decision_type: "RECHECK_ARTICLE", priority: "medium", score: 45, rule: "article.fact_failure.autofix", reason: `Fact check BLOCKED: automatic fix ${used + 1} rewrites only the flagged sentences as general wording (no facts invented).`, evidence: { ...s.evidence, revisions_used: used, flagged: (a.blocked_claims || []).length } }, { action_type: "REQUEST_REVISION", target_type: "article", target_id: a.id, idempotency_key: `revision:${a.id}:v${a.current_version}:${used + 1}`, instruction: autoFixInstruction(a.blocked_claims || []) });
+      plan({ signal: s, decision_type: "RECHECK_ARTICLE", priority: "medium", score: 45, rule: "article.fact_failure.autofix", reason: `Fact check BLOCKED: automatic fix ${used + 1} rewrites only the flagged sentences as general wording (no facts invented).`, evidence: { ...s.evidence, revisions_used: used, flagged: (a.blocked_claims || []).length } }, { action_type: "REQUEST_REVISION", target_type: "article", target_id: a.id, idempotency_key: `revision:${a.id}:v${a.current_version}:${used + 1}${retrySuffix(ctx, a)}`, instruction: autoFixInstruction(a.blocked_claims || []) });
     } else if (a.status === "needs_revision" && a.fact_check_status === "blocked" && p.pause_on_fact_failure) {
       out.push(decision({ signal: s, decision_type: "REQUEST_HUMAN_REVIEW", priority: "high", rule: "article.fact_failure", requires_approval: true, reason: "Fact check is BLOCKED (unsupported/contradicted high-risk claims). pause_on_fact_failure: no automatic revision; a human must review the claims or business facts.", evidence: s.evidence, planned_action: { action_type: "NOTIFY_HUMAN", target_type: "article", target_id: a.id, idempotency_key: `notify:factfail:${a.id}:v${a.current_version}`, task: { kind: "missing_facts", title: `Fact check blocked: ${a.title || a.primary_keyword}` } } }));
     } else if (a.status === "needs_revision") {

@@ -402,3 +402,13 @@ test("failed managed article → one automatic retry, then human", () => {
   const d2 = run(ctx({ revisionsByArticle: { ar9: 1 }, articles: [{ id: "ar9", managed: true, status: "failed", current_version: 0 }] }));
   assert.ok(d2.some((x) => x.rule === "article.failed"));
 });
+
+test("a revision that died on a provider outage (no credits) doesn't use up the automatic fix", () => {
+  const base = { articles: [{ id: "ar1", managed: true, status: "needs_revision", current_version: 2, fact_check_status: "blocked", blocked_claims: ["x"] }] };
+  const d = run(ctx({ ...base, revisionsByArticle: {}, revisionFailuresByArticle: { ar1: 1 } }));
+  const r = d.find((x) => x.planned_action?.action_type === "REQUEST_REVISION");
+  assert.ok(r && r.rule === "article.fact_failure.autofix");
+  assert.match(r.planned_action.idempotency_key, /:r1$/);
+  const capped = run(ctx({ ...base, revisionsByArticle: {}, revisionFailuresByArticle: { ar1: 3 } }));
+  assert.ok(!capped.find((x) => x.planned_action?.action_type === "REQUEST_REVISION"));
+});

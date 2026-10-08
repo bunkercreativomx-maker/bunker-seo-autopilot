@@ -294,7 +294,16 @@ export class Engine {
     const managedActs = await this.all("autopilot_actions", `website = "${wid}" && article != ""`, { fields: "article,action_type,status,created_at" });
     const managed = new Set(managedActs.filter((a) => a.action_type === "GENERATE_CONTENT").map((a) => a.article));
     const revisions = {};
-    for (const a of managedActs) if (a.action_type === "REQUEST_REVISION" && !["skipped", "cancelled", "blocked", "planned"].includes(a.status)) revisions[a.article] = (revisions[a.article] || 0) + 1;
+    const revisionFailures = {};
+    // A revision whose job died on a provider outage (no credits, 429, 5xx,
+    // timeout) never touched the article: it must not use up the article's
+    // automatic fix. Those are counted apart and retried (capped).
+    const providerOutage = (a) => a.status === "failed" && /429|credit_balance|insufficient_quota|rate.?limit|5\d\d|timeout|timed out|ECONN|fetch failed/i.test(`${a.error_message || ""} ${a.error_code || ""} ${JSON.stringify(a.result || {})}`);
+    for (const a of managedActs) {
+      if (a.action_type !== "REQUEST_REVISION" || ["skipped", "cancelled", "blocked", "planned"].includes(a.status)) continue;
+      if (providerOutage(a)) revisionFailures[a.article] = (revisionFailures[a.article] || 0) + 1;
+      else revisions[a.article] = (revisions[a.article] || 0) + 1;
+    }
     const arts = await this.all("articles", `website = "${wid}"`, { fields: "id,status,title,primary_keyword,recommended_url,content_opportunity,current_version,qa_status,qa_score,flags,risk_categories,fact_check_status,high_risk,featured_image,approved_by,approved_at,approved_version,approved_hash,updated_at,expand.approved_by.name", expand: "approved_by" });
     const pubs = await this.all("article_publications", `website = "${wid}"`, { fields: "id,article,status,public_url,article_version,published_at,updated,updated_at" });
     const pubBy = Object.fromEntries(pubs.map((p) => [p.article, p]));
@@ -329,7 +338,7 @@ export class Engine {
       crawl: { last_id: lastCrawl?.id || "", last_completed_at: lastCrawl?.completed_at || lastCrawl?.created_at || "", active: Boolean(activeCrawl), material_changes: material },
       strategy: { last_version_id: lastVersion?.id || "", last_generated_at: lastVersion?.generated_at || "", active: Boolean(activeStrategy) },
       technical: [...groups.values()], opportunities, cannibalization: cannibal.map((c) => ({ id: c.id, keyword_group: c.keyword_group, keyword_norm: normalize(c.keyword_group) })),
-      facts: { verified_types: verifiedTypesFrom(facts) }, articles: articles.map((a) => ({ ...a, eligible_for_auto_publish: a.managed && a.approval_after_policy })), revisionsByArticle: revisions,
+      facts: { verified_types: verifiedTypesFrom(facts) }, articles: articles.map((a) => ({ ...a, eligible_for_auto_publish: a.managed && a.approval_after_policy })), revisionsByArticle: revisions, revisionFailuresByArticle: revisionFailures,
       gsc, analytics, circuits, usage: await this.usage(w.id), estimates: await this.estimates(w.organization), health: await this.health(),
     };
   }
