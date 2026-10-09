@@ -64,7 +64,7 @@ main:has(.hub){max-width:none;padding:0}
 .bh-hero .bh-in{text-align:center}
 .bh-kicker{display:inline-block;background:var(--b-hot);color:#fff;font-weight:900;font-style:italic;text-transform:uppercase;letter-spacing:.04em;padding:4px 14px;border-radius:3px;transform:skewX(-12deg);margin-bottom:18px}
 .bh-hero h1{font-size:clamp(2.6rem,6vw,4.6rem);font-weight:900;line-height:1.05;margin:0 0 20px;letter-spacing:-.02em}
-.bh-hero h1 span{color:var(--b-accent)}
+.bh-hero h1 span{color:var(--b-hero-accent,var(--b-accent))}
 .bh-hero p{font-size:clamp(1.1rem,2vw,1.45rem);font-weight:500;opacity:.9;max-width:680px;margin:0 auto}
 .bh-list{padding:88px 0 96px;background:#fff}
 .bh-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:32px}

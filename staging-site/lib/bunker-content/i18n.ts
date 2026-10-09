@@ -5,6 +5,7 @@ const ES = {
   empty: "Pronto publicaremos nuestros primeros artículos.",
   desc: (n: string, a: string) => `Artículos y guías de ${n}${a ? ` en ${a}` : ""}.`,
   updated: "Actualizado", boxText: "¿Tienes dudas sobre este tema? Con gusto te ayudamos.", visit: "Visitar el sitio",
+  contact: "Contacto", links: "Enlaces r\u00e1pidos", rights: "Todos los derechos reservados.",
   locale: "es-MX",
 };
 const EN: typeof ES = {
@@ -13,6 +14,7 @@ const EN: typeof ES = {
   empty: "Our first articles are coming soon.",
   desc: (n: string, a: string) => `Articles and guides from ${n}${a ? ` in ${a}` : ""}.`,
   updated: "Updated", boxText: "Questions about this topic? We're happy to help.", visit: "Visit the website",
+  contact: "Contact Us", links: "Quick Links", rights: "All rights reserved.",
   locale: "en-US",
 };
 export const t = (lang?: string) => (String(lang || "").toLowerCase().startsWith("en") ? EN : ES);

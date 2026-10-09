@@ -49,7 +49,7 @@ export default async function HubIndex({ params }: Props) {
     return (
       <>
         {ldTag}
-        <section className="bh-hero" style={th.heroImage ? { backgroundImage: `linear-gradient(100deg, rgba(0,46,91,.96) 35%, rgba(0,46,91,.72)), url(${th.heroImage})` } : undefined}>
+        <section className="bh-hero" style={th.heroImage ? { backgroundImage: `${th.heroOverlay ?? "linear-gradient(100deg, rgba(0,46,91,.96) 35%, rgba(0,46,91,.72))"}, url(${th.heroImage})` } : th.heroBg ? { backgroundImage: th.heroBg } : undefined}>
           <div className="bh-in">
             <span className="bh-kicker">Blog</span>
             <h1>{th.heroTitle[0]} <span>{th.heroTitle[1]}</span></h1>
@@ -60,7 +60,7 @@ export default async function HubIndex({ params }: Props) {
           <div className="bh-in">
             {posts.length === 0 ? (
               <div className="bh-empty">
-                <div className="bh-empty-ic" aria-hidden>❄</div>
+                <div className="bh-empty-ic" aria-hidden>{th.icon ?? "❄"}</div>
                 <h2>{L.empty}</h2>
                 <p>{th.ctaText}</p>
                 <a className="bh-btn bh-btn-accent" href={`tel:${tn}`}>{L.call} {s.phone}</a>
@@ -69,7 +69,7 @@ export default async function HubIndex({ params }: Props) {
               <div className="bh-grid">
                 {posts.map((p) => (
                   <a key={p.slug} className="bh-card" href={publicUrl(s, p.slug)}>
-                    <div className="bh-card-img">{p.featured_image ? <img src={p.featured_image} alt="" loading="lazy" /> : <div className="bh-ph" aria-hidden>❄</div>}</div>
+                    <div className="bh-card-img">{p.featured_image ? <img src={p.featured_image} alt="" loading="lazy" /> : <div className="bh-ph" aria-hidden>{th.icon ?? "❄"}</div>}</div>
                     <div className="bh-card-body">
                       <div className="bh-meta"><span>{fmt(p.published_at)}</span><span>{th.author}</span></div>
                       <h2>{p.title}</h2>

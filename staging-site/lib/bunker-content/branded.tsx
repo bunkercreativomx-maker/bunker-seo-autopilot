@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { HubTheme } from "./themes";
 import type { SiteProfile } from "./hub";
+import { t as tr } from "./i18n";
 
 const Phone = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/></svg>
@@ -18,11 +19,12 @@ const Pin = () => (
 export const tel = (phone: string) => phone.replace(/[^\d+]/g, "");
 
 export function themeStyle(th: HubTheme): CSSProperties {
-  return { ["--b-primary" as string]: th.colors.primary, ["--b-accent" as string]: th.colors.accent, ["--b-hot" as string]: th.colors.hot, ["--b-bar" as string]: th.colors.bar };
+  return { ["--b-primary" as string]: th.colors.primary, ["--b-accent" as string]: th.colors.accent, ["--b-hot" as string]: th.colors.hot, ["--b-bar" as string]: th.colors.bar, ["--b-hero-accent" as string]: th.heroAccent ?? th.colors.accent };
 }
 
 export function BrandedShell({ th, s, staging, children }: { th: HubTheme; s: SiteProfile; staging?: string; children: ReactNode }) {
   const t = tel(s.phone);
+  const L = tr(s.language);
   return (
     <div className="hub bh" style={themeStyle(th)} lang={s.language?.startsWith("en") ? "en" : "es"}>
       {staging ? <div className="banner">{staging}</div> : null}
@@ -67,7 +69,7 @@ export function BrandedShell({ th, s, staging, children }: { th: HubTheme; s: Si
             {th.facebook ? <a className="bh-fb" href={th.facebook} target="_blank" rel="noopener noreferrer">Facebook</a> : null}
           </div>
           <div>
-            <h3>Contact Us</h3>
+            <h3>{L.contact}</h3>
             <ul className="bh-contact">
               <li><span className="bh-ic"><Phone /></span><a href={`tel:${t}`}>{s.phone}</a></li>
               {th.email ? <li><span className="bh-ic"><Mail /></span><a href={`mailto:${th.email}`}>{th.email}</a></li> : null}
@@ -75,11 +77,11 @@ export function BrandedShell({ th, s, staging, children }: { th: HubTheme; s: Si
             </ul>
           </div>
           <div>
-            <h3>Quick Links</h3>
+            <h3>{L.links}</h3>
             <ul className="bh-links">{th.quickLinks.map((l) => <li key={l.href}><a href={l.href}>{l.label}</a></li>)}</ul>
           </div>
         </div>
-        <div className="bh-in bh-copy">© {new Date().getFullYear()} {s.name}. All rights reserved.</div>
+        <div className="bh-in bh-copy">© {new Date().getFullYear()} {s.name}. {L.rights}</div>
       </footer>
     </div>
   );
