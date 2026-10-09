@@ -329,7 +329,8 @@ export function scrubSentences(markdown, targets) {
       if (!t.toks.size || !st.size) return false;
       let common = 0;
       for (const w of t.toks) if (st.has(w)) common++;
-      return common / t.toks.size >= 0.6 && common / st.size >= 0.5;
+      // Same sentence, or a fragment (list item) the claim paraphrases around.
+      return (common / t.toks.size >= 0.6 && common / st.size >= 0.5) || (st.size >= 4 && common / st.size >= 0.8);
     });
   };
   const out = [];

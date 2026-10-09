@@ -183,3 +183,10 @@ test("Modo Soro: unconfirmed sentences are deleted instead of blocking the post"
   assert.match(r.markdown, /Revisamos tu recibo de CFE/);
   assert.equal(scrubSentences("# T\n\nNada que quitar.", ["frase inexistente totalmente distinta"]).removed.length, 0);
 });
+
+test("Modo Soro: a list item the flagged claim paraphrases is removed too", () => {
+  const md = "# Paneles\n\nTe pedimos:\n\n- Consumos estimados futuros si esperas cambios (nuevos equipos, ampliaciones, etc.).\n- Dirección del inmueble.";
+  const r = scrubSentences(md, ["Para preparar una propuesta normalmente se solicita consumos estimados futuros si se esperan cambios (nuevos equipos, ampliaciones, etc.)."]);
+  assert.equal(r.removed.length, 1);
+  assert.match(r.markdown, /Dirección del inmueble/);
+});
