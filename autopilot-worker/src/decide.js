@@ -28,7 +28,8 @@ const GENERATE_TYPES = ["create", "service", "location", "expand", "optimize", "
 
 // Safe auto-publish (simple mode). Deterministic and fail-closed: any flag
 // that is not a known harmless SEO advisory keeps the post for a human.
-export const AUTO_PUBLISH_MIN_SCORE = 85;
+export const AUTO_PUBLISH_MIN_SCORE = 70;
+export const HARD_FLAGS = new Set(["LANGUAGE_MISMATCH", "POTENTIAL_DUPLICATE_CONTENT"]);
 export const HARMLESS_FLAGS = new Set(["RESEARCH_LIMITED", "META_DESCRIPTION_LENGTH", "SEO_TITLE_LENGTH", "SEO_TITLE_KEYWORD", "SLUG_FORMAT", "MINOR_ADVISORY", "NOT_REQUIRED", "NOT_APPLICABLE"]);
 // Provider outages (no credits / 429 / 5xx) don't consume the automatic fix;
 // each outage retry gets a fresh idempotency key, capped at 3.
@@ -46,14 +47,14 @@ export function autoPublishBlockers(a) {
   if (!a) return ["no article"];
   if (a.status !== "awaiting_approval") b.push(`status ${a.status}`);
   if (!a.managed) b.push("not written by Autopilot");
-  if (a.qa_status !== "PASS") b.push(`QA ${a.qa_status || "pending"}`);
+  if (!["PASS", "NEEDS_REVISION"].includes(a.qa_status)) b.push(`QA ${a.qa_status || "pending"}`);
   const sc = qaScoreOf(a);
   if (sc === null || sc < AUTO_PUBLISH_MIN_SCORE) b.push(`score ${sc ?? "none"} < ${AUTO_PUBLISH_MIN_SCORE}`);
-  if (a.fact_check_status !== "passed") b.push(`fact check ${a.fact_check_status || "pending"}`);
+  if (!["passed", "issues"].includes(a.fact_check_status)) b.push(`fact check ${a.fact_check_status || "pending"}`);
   if (a.high_risk) b.push("sensitive topic");
   if (!a.featured_image) b.push("no featured image yet");
-  if (Array.isArray(a.risk_categories) && a.risk_categories.length) b.push(`risk: ${a.risk_categories.join(",")}`);
-  const bad = (Array.isArray(a.flags) ? a.flags : []).map((f) => (typeof f === "string" ? f : f?.code || f?.type || JSON.stringify(f))).filter((f) => !HARMLESS_FLAGS.has(f));
+  // Modo Soro: only flags that mean a broken post hold it back.
+  const bad = (Array.isArray(a.flags) ? a.flags : []).map((f) => (typeof f === "string" ? f : f?.code || f?.type || JSON.stringify(f))).filter((f) => HARD_FLAGS.has(f));
   if (bad.length) b.push(`flags: ${bad.join(",")}`);
   return b;
 }

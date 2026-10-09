@@ -9,7 +9,7 @@ import { limitsForJob } from "./config.js";
 import { attachSources, buildContext, evidenceIndex } from "./context.js";
 import {
   buildStructuredData, checkMetadata, classifyQaCheck, classifyQaIssue, currentRisk, duplicateCheck, enforceClaim, externalLinks, isNonClaimText, keywordStats,
-  localDifferentiation, processLinks, repetitionStats, sanitizeSlug, scanEditorialLanguage, scanUnsupportedSpecifics, scanUnverifiedBusinessMentions,
+  localDifferentiation, processLinks, repetitionStats, sanitizeSlug, scrubSentences, scanEditorialLanguage, scanUnsupportedSpecifics, scanUnverifiedBusinessMentions,
   structureStats, summarizeClaims,
 } from "./checks.js";
 import {
@@ -85,14 +85,16 @@ function computeQaStatus({ qa, claimSummary, specifics, duplicate, local, struct
   const blockerSpecifics = specifics.filter((s) => s.severity === "blocker");
   if (blockerSpecifics.length) reasons.push(`Unverified specifics: ${blockerSpecifics.map((s) => s.value).slice(0, 5).join(", ")}`);
   if (duplicate.level === "severe") reasons.push("Near-duplicate of existing content");
-  if (local.level === "severe") reasons.push("Insufficient local differentiation");
   if (structure.languageMismatch) reasons.push(`Language mismatch (expected ${structure.expectedLanguage}, got ${structure.detectedLanguage})`);
   if (structure.h1 !== 1) reasons.push(`Expected exactly one H1, found ${structure.h1}`);
   // Approval eligibility rests on BLOCKERs (factual/policy problems), not on
   // the numeric score. Advisories and NOT_APPLICABLE suggestions never block.
-  const qaBlockers = qa.issues.filter((i) => i.classification === "BLOCKER");
+  // Modo Soro: the AI reviewer's opinions and thin local evidence lower the
+  // score / show as notes; they never stop a post. Only concrete problems do.
+  const qaBlockers = qa.issues.filter((i) => i.classification === "BLOCKER" && i.origin === "deterministic" && ["unsupported_claims", "grammar", "duplicate_content", "structure", "brand_consistency"].includes(i.check));
   if (qaBlockers.length) reasons.push(`${qaBlockers.length} QA blocker(s)`);
   if (reasons.length) return { status: "BLOCKED", reasons };
+  if (local.level === "severe") return { status: "NEEDS_REVISION", reasons: ["Limited local evidence"] };
   const majors = qa.issues.filter((i) => i.classification === "MAJOR_ADVISORY").length;
   const failedChecks = qa.checks.filter((c) => c.classification === "BLOCKER" || c.classification === "MAJOR_ADVISORY").length;
   if (majors || failedChecks || claimSummary.unverified || duplicate.level === "warning" || local.level === "warning") {
@@ -180,7 +182,7 @@ export async function processContentJob(pb, job, deps) {
         // those facts; unsupported specifics (rates, amounts) are omitted by the
         // writer rules, so missing external sources is not a reason to stop.
         const commercialWithFacts = ["service_page", "location_page", "existing_page_optimization"].includes(article.content_type) && (context.verified_facts || []).length >= 3;
-        const researchRequired = noExternal && (requireExternal || (!commercialWithFacts && (research.time_sensitive || research.research_sufficiency === "insufficient")));
+        const researchRequired = noExternal && requireExternal && !commercialWithFacts; // Modo Soro: write with the site + verified facts
         const researchRecord = {
           organization: article.organization, client: article.client, website: article.website, article: article.id,
           search_intent: research.search_intent, audience: research.audience, questions: research.questions,
@@ -267,6 +269,7 @@ export async function processContentJob(pb, job, deps) {
 
     // ------------------------------------------------------ review loop
     let cycle = 0;
+    let scrubs = 0;
     for (;;) {
       await progress("optimizing_seo");
       await saveState({ status: "qa" });
@@ -367,12 +370,30 @@ export async function processContentJob(pb, job, deps) {
         provenance: { ...(article.provenance || {}), high_risk: risk.high_risk, high_risk_claims: risk.high_risk_claims, research_risk_categories: research.risk_categories || [], auto_publish_allowed: false, last_checked_at: now(), last_checked_version: article.current_version },
       });
 
-      if (verdict.status === "PASS") {
+      if (verdict.status === "PASS" || verdict.status === "NEEDS_REVISION") {
+        // Modo Soro: advisories never cost another AI rewrite; the post is ready.
         await saveState({ status: "awaiting_approval" });
         await logActivity(pb, { article, action: "QA_PASSED", metadata: { version: article.current_version, cycle, flags: [...flags] } });
         break;
       }
       await logActivity(pb, { article, action: "QA_FAILED", metadata: { version: article.current_version, cycle, status: verdict.status, reasons: verdict.reasons } });
+      // Modo Soro: delete unconfirmed sentences (no AI, no cost) before any rewrite.
+      const scrubTargets = [
+        ...claims.filter((c) => c.blocking).map((c) => c.claim),
+        ...unverifiedMentions.map((m) => m.value),
+        ...editorial.map((e) => e.value),
+        ...specifics.filter((s) => s.severity === "blocker").map((s) => s.value),
+      ];
+      if (scrubTargets.length && scrubs < 2) {
+        const scrub = scrubSentences(content, scrubTargets);
+        if (scrub.removed.length && scrub.markdown.trim() !== String(content).trim()) {
+          scrubs++;
+          const version = await createVersion(pb, article, { title: article.title, content: scrub.markdown }, { changeType: "ai_revision", reason: `Auto-clean: removed ${scrub.removed.length} unconfirmed sentence(s): ${scrub.removed.map((r) => r.slice(0, 80)).join(" | ").slice(0, 1400)}`, label: "auto-clean" });
+          await saveState({ content: scrub.markdown, current_version: version, status: "qa" });
+          await logActivity(pb, { article, action: "AUTO_CLEANED", metadata: { version, removed: scrub.removed.length } });
+          continue;
+        }
+      }
       if (cycle >= autoCycles) {
         // Revision limit reached: hand to a human. BLOCKED content cannot be approved.
         await saveState({ status: verdict.status === "BLOCKED" ? "needs_revision" : "awaiting_approval" });

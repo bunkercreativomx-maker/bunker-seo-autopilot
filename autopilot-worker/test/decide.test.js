@@ -321,11 +321,11 @@ test("safe auto-publish: only clean posts publish themselves; everything else wa
   const arts = [
     { ...base, id: "ok" },
     { ...base, id: "noimage", featured_image: "" },
-    { ...base, id: "low", qa_score: { score: 80 } },
-    { ...base, id: "fact", fact_check_status: "issues" },
+    { ...base, id: "low", qa_score: { score: 60 } },
+    { ...base, id: "fact", fact_check_status: "blocked" },
     { ...base, id: "risk", high_risk: true },
-    { ...base, id: "claim", flags: ["UNSUPPORTED_PRICE"] },
-    { ...base, id: "unknownflag", flags: [{ code: "SOMETHING_NEW" }] },
+    { ...base, id: "claim", flags: ["LANGUAGE_MISMATCH"] },
+    { ...base, id: "unknownflag", flags: [{ code: "POTENTIAL_DUPLICATE_CONTENT" }] },
     { ...base, id: "notmine", managed: false },
   ];
   const on = run(ctx({ policy: { auto_publish_safe: true, max_publications_per_week: 10, max_actions_per_day: 20 }, articles: arts }));

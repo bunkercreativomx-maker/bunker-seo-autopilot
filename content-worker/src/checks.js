@@ -294,8 +294,10 @@ export function currentRisk(content, claims, { verifiedFacts = [] } = {}) {
   // CONTRADICTED) or any high-risk claim. Words alone ("crédito" on a credit
   // business, "regulation" in an HVAC post) are kept as copy_hits for the
   // reviewer but no longer hold a post back.
-  const byClaims = new Set(claims.filter((c) => ["UNVERIFIED", "CONTRADICTED"].includes(c.verification_status) && ["medical", "legal", "financial"].includes(c.claim_type)).map((c) => c.claim_type));
-  const highClaims = claims.filter((c) => c.risk_level === "high").length;
+  // Modo Soro: only claims that still BLOCK (they are auto-removed) or money
+  // talk outside the business's own niche make a post "sensitive".
+  const byClaims = new Set(claims.filter((c) => c.blocking || (c.verification_status === "CONTRADICTED")).map((c) => c.claim_type).filter((t) => ["medical", "legal", "financial"].includes(t)));
+  const highClaims = claims.filter((c) => c.blocking || (c.verification_status === "CONTRADICTED")).length;
   const copy = detectRisk([content]);
   // Copy words still flag, except the category the business itself is verified
   // for (a credit company talking about "crédito" is its product, not a risk).
@@ -304,8 +306,49 @@ export function currentRisk(content, claims, { verifiedFacts = [] } = {}) {
     if (String(f.value || "").startsWith("NOT OFFERED") || !["service", "product", "business_name"].includes(f.type)) continue;
     for (const c of detectRisk([`${f.label || ""} ${f.value || ""}`]).categories) own.add(c);
   }
-  const categories = [...new Set([...byClaims, ...copy.categories.filter((c) => !own.has(c) && c !== "regulated" && c !== "safety")])];
+  const categories = [...new Set([...byClaims, ...copy.categories.filter((c) => !own.has(c) && c === "financial")])];
   return { high_risk: highClaims > 0 || categories.length > 0, categories, high_risk_claims: highClaims, copy_hits: copy.hits };
+}
+
+/**
+ * Modo Soro: instead of blocking a post, delete the sentences that state
+ * unconfirmed business information. Deterministic, no AI. A sentence goes when
+ * it contains a target verbatim or shares >= 60% of a target's words.
+ */
+export function scrubSentences(markdown, targets) {
+  const tgt = targets.map((t) => String(t || "").trim()).filter((t) => t.length >= 3)
+    .map((t) => ({ norm: normalizeForMatch(t), toks: new Set(tokens(t).filter((w) => w.length > 2)) }));
+  if (!tgt.length) return { markdown, removed: [] };
+  const removed = [];
+  const hit = (sentence) => {
+    const n = normalizeForMatch(sentence);
+    if (!n) return false;
+    const st = new Set(tokens(sentence).filter((w) => w.length > 2));
+    return tgt.some((t) => {
+      if (t.norm.length >= 4 && t.norm.length <= 40 && n.includes(t.norm)) return true;
+      if (!t.toks.size || !st.size) return false;
+      let common = 0;
+      for (const w of t.toks) if (st.has(w)) common++;
+      return common / t.toks.size >= 0.6 && common / st.size >= 0.5;
+    });
+  };
+  const out = [];
+  for (const line of String(markdown || "").split("\n")) {
+    const m = line.match(/^(\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)?)(.*)$/);
+    const prefix = m[1] || "";
+    const body = m[2] || "";
+    if (/^\s*#{1,6}\s+/.test(prefix)) {
+      if (!/^#\s/.test(prefix.trim() + " ") && hit(body)) { removed.push(body); continue; }
+      out.push(line); continue;
+    }
+    const parts = body.split(/(?<=[.!?])\s+/);
+    const kept = parts.filter((p) => { if (hit(p)) { removed.push(p); return false; } return true; });
+    if (kept.length === parts.length) { out.push(line); continue; }
+    if (!kept.join("").trim()) continue; // whole line/list item removed
+    out.push(prefix + kept.join(" "));
+  }
+  const cleaned = out.join("\n").replace(/\n{3,}/g, "\n\n");
+  return { markdown: cleaned, removed };
 }
 
 export function summarizeClaims(claims) {
@@ -555,7 +598,7 @@ export function localDifferentiation(markdown, context) {
 const RISK_TERMS = {
   medical: ["medico", "medica", "medicamento", "medical", "medicine", "salud ", "health ", "enfermedad", "disease", "diagnost", "sintoma", "symptom", "clinica", "clinic ", "farmac", "dermatolog", "cirugia", "surgery", "tratamiento medico", "medical treatment"],
   legal: ["abogad", "attorney", "lawyer", "demanda judicial", "lawsuit", "normativa", "regulation", "reglamento", "legal ", "legalmente", "ley federal", "ley general", "contrato", "contract "],
-  financial: ["financiamiento", "financiacion", "financing", "credito", "credit ", "prestamo", "loan ", "loans ", "tasa de interes", "interest rate", "intereses", "inversion", "investment", "retorno de inversion", "roi ", "deducib", "deducción", "impuesto", "tax credit", "tax deduction", "hipoteca", "mortgage", "meses sin intereses"],
+  financial: ["financiamiento", "financiacion", "financing", "credito", "credit ", "prestamo", "loan ", "loans ", "tasa de interes", "interest rate", "intereses", "deducib", "deducción", "impuesto", "tax credit", "tax deduction", "hipoteca", "mortgage", "meses sin intereses"],
   safety: ["electrocu", "incendio", "fire hazard", "riesgo electrico", "descarga electrica", "electrical shock", "seguridad electrica", "electrical safety", "gas leak", "fuga de gas", "monoxido"],
   regulated: ["cfe ", "interconexion", "net metering", "medicion neta", "subsidio", "subsidy", "licencia", "license ", "certificacion oficial", "nom-"],
 };

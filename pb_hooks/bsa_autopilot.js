@@ -20,23 +20,23 @@ const ACTION_TYPES = ["CRAWL", "STRATEGY_REFRESH", "GENERATE_CONTENT", "RECHECK_
 
 // Safe auto-publish rule (must match autopilot-worker/src/decide.js). Re-checked
 // here at execution time, fail-closed.
-const AUTO_PUBLISH_MIN_SCORE = 85;
+const AUTO_PUBLISH_MIN_SCORE = 70;
+const HARD_FLAGS = ["LANGUAGE_MISMATCH", "POTENTIAL_DUPLICATE_CONTENT"];
 const HARMLESS_FLAGS = ["RESEARCH_LIMITED", "META_DESCRIPTION_LENGTH", "SEO_TITLE_LENGTH", "SEO_TITLE_KEYWORD", "SLUG_FORMAT", "MINOR_ADVISORY", "NOT_REQUIRED", "NOT_APPLICABLE"];
 function autoPublishBlockers(a) {
   const b = [];
   if (a.status !== "awaiting_approval") b.push("status " + a.status);
-  if (a.qa_status !== "PASS") b.push("QA " + (a.qa_status || "pending"));
+  if (a.qa_status !== "PASS" && a.qa_status !== "NEEDS_REVISION") b.push("QA " + (a.qa_status || "pending"));
   const r = a.qa_score;
   const sc = typeof r === "number" ? r : (r && typeof r === "object" && typeof r.score === "number" ? r.score : null);
   if (sc === null || Math.round(sc) < AUTO_PUBLISH_MIN_SCORE) b.push("score " + sc + " < " + AUTO_PUBLISH_MIN_SCORE);
-  if (a.fact_check_status !== "passed") b.push("fact check " + (a.fact_check_status || "pending"));
+  if (a.fact_check_status !== "passed" && a.fact_check_status !== "issues") b.push("fact check " + (a.fact_check_status || "pending"));
   if (a.high_risk) b.push("sensitive topic");
   if (!a.featured_image) b.push("no featured image yet");
-  if (Array.isArray(a.risk_categories) && a.risk_categories.length) b.push("risk categories");
   const flags = Array.isArray(a.flags) ? a.flags : [];
   for (const f of flags) {
     const code = typeof f === "string" ? f : (f && (f.code || f.type)) || JSON.stringify(f);
-    if (HARMLESS_FLAGS.indexOf(code) === -1) b.push("flag " + code);
+    if (HARD_FLAGS.indexOf(code) !== -1) b.push("flag " + code);
   }
   return b;
 }

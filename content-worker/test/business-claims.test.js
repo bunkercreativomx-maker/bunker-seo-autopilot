@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildContext, evidenceIndex } from "../src/context.js";
-import { localDifferentiation, enforceClaim, factSupportsClaim, isBusinessClaim, isNonClaimText, isOwnSitePointer, scanUnverifiedBusinessMentions } from "../src/checks.js";
+import { scrubSentences, localDifferentiation, enforceClaim, factSupportsClaim, isBusinessClaim, isNonClaimText, isOwnSitePointer, scanUnverifiedBusinessMentions } from "../src/checks.js";
 
 const T = { organization: "org1", client: "cliA", website: "webA" };
 function data() {
@@ -171,4 +171,15 @@ test("local evidence matches the city even when facts omit the state", () => {
   const c = { meta: { content_type: "location_page", target_location: "Ciudad Juárez, Chihuahua" }, verified_facts: ctx.verified_facts, crawler_evidence: [{ id: "C1", title: "Inicio", h1: "Solar", text: "Instalaciones en Ciudad Juárez" }], external_sources: [], other_articles: [] };
   const r = localDifferentiation("# x", c);
   assert.ok(r.local_evidence.length >= 2, JSON.stringify(r));
+});
+
+test("Modo Soro: unconfirmed sentences are deleted instead of blocking the post", () => {
+  const md = "# Paneles solares en Juárez\n\n## Garantías y financiamiento\n\nInstalamos sistemas residenciales. Ofrecemos garantía de por vida en la instalación. Llámanos al 656 695 3960.\n\n- Tenemos más de 500 instalaciones activas.\n- Revisamos tu recibo de CFE.";
+  const r = scrubSentences(md, ["Ofrecemos garantía de por vida en la instalación.", "Tenemos más de 500 instalaciones activas.", "Garantías y financiamiento"]);
+  assert.equal(r.removed.length, 3);
+  assert.match(r.markdown, /^# Paneles solares en Juárez/);
+  assert.match(r.markdown, /Instalamos sistemas residenciales\. Llámanos al 656 695 3960\./);
+  assert.doesNotMatch(r.markdown, /garantía|500/i);
+  assert.match(r.markdown, /Revisamos tu recibo de CFE/);
+  assert.equal(scrubSentences("# T\n\nNada que quitar.", ["frase inexistente totalmente distinta"]).removed.length, 0);
 });

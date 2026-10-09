@@ -29,7 +29,7 @@ test("high-risk flag reflects CURRENT claims/copy: all-low v10 clears it; a curr
   assert.deepEqual(r.categories, []);
   assert.equal(r.high_risk_claims, 0);
   // research-stage topic categories (legal/financial/regulated) no longer leak into the current flag
-  const withHigh = [...claims, { claim: "Existen incentivos fiscales", claim_type: "financial", verification_status: "UNVERIFIED", risk_level: "high" }];
+  const withHigh = [...claims, { claim: "Existen incentivos fiscales", claim_type: "financial", verification_status: "UNVERIFIED", risk_level: "high", blocking: true }];
   assert.equal(currentRisk(v10, withHigh).high_risk, true);
   assert.equal(currentRisk(`${v10}\n\nOfrecemos financiamiento sin intereses.`, claims).high_risk, true, "risky copy still flags");
   // a credit business talking about its own verified product is not "sensitive"

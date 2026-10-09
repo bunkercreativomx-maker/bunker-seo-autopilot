@@ -62,7 +62,7 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
   const reviewable = REVIEWABLE.includes(post.status) && canEdit;
   const checksPending = ["stale", "pending", ""].includes(post.qaStatus) || ["stale", "pending", ""].includes(post.factStatus);
   const blocked = post.qaStatus === "BLOCKED" || post.factStatus === "blocked";
-  const needsTick = post.highRisk || post.qaStatus === "NEEDS_REVISION" || Boolean(pub.state?.needsReview);
+
   const canPublish = canEdit && !working && !editing && !blocked && !checksPending && ["awaiting_approval", "approved", "publish_failed"].includes(post.status) && Boolean(post.image);
   const busy = save.pending || img.pending || rew.pending || pub.pending || dis.pending || retry.pending || fix.pending;
   // Plain-words reason whenever Publish can't be pressed.
@@ -88,7 +88,7 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
   else if (waitingImage) status = { tone: "blue", text: "Making the featured image…" };
   else if (post.status === "approved") status = { tone: "amber", text: "Approved — press Publish to put it on the website." };
   else if (post.status === "publish_failed") status = { tone: "red", text: "Couldn’t reach the website — try Publish again." };
-  else status = { tone: "green", text: needsTick ? "Ready. Read it once, tick the box and publish." : "Ready to publish." };
+  else status = { tone: "green", text: "Ready to publish." };
   const tones = { green: "bg-emerald-50 text-emerald-800 ring-emerald-200", amber: "bg-amber-50 text-amber-800 ring-amber-200", red: "bg-rose-50 text-rose-800 ring-rose-200", blue: "bg-sky-50 text-sky-800 ring-sky-200", slate: "bg-slate-50 text-slate-700 ring-slate-200" };
 
   if (post.status === "rejected") {
@@ -227,11 +227,8 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
               {hidden}
               {!LIVE.includes(post.status) && (
                 <>
-                  {needsTick && ["awaiting_approval", "approved", "publish_failed"].includes(post.status) && (
-                    <label className="mr-1 flex items-center gap-2 text-xs text-slate-700">
-                      <input type="checkbox" name="reviewed" className="h-4 w-4 rounded border-slate-300" /> I read it and it’s correct
-                    </label>
-                  )}
+                  {/* Modo Soro: pressing Publish is the human review — no extra checkbox. */}
+                  <input type="hidden" name="reviewed" value="on" />
                   <button disabled={!canPublish || busy} title={!post.image ? "Waiting for the image" : checksPending ? "Checking the latest changes" : ""}
                     className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">
                     {pub.pending ? "Publishing…" : post.status === "awaiting_approval" ? "Approve & publish" : "Publish"}

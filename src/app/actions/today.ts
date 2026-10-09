@@ -19,7 +19,7 @@ const done = () => { revalidatePath("/today"); revalidatePath("/content"); };
 export async function publishPostAction(_p: TodayState, f: FormData): Promise<TodayState> {
   const articleId = str(f, "articleId");
   const websiteId = str(f, "websiteId");
-  const reviewed = f.get("reviewed") === "on";
+  const reviewed = true; // Modo Soro: pressing Publish is the review
   try {
     const { pb } = await requireUser();
     await userOperation(pb, "content/approve", { articleId, acknowledgeHighRisk: reviewed, acknowledgeWarnings: reviewed });

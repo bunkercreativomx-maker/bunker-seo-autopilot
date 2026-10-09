@@ -69,7 +69,7 @@ export async function reviewRewriteAction(_p: ReviewState, f: FormData): Promise
 export async function approvePublishAction(_p: ReviewState, f: FormData): Promise<ReviewState> {
   const articleId = str(f, "articleId");
   const websiteId = str(f, "websiteId");
-  const reviewed = f.get("reviewed") === "on";
+  const reviewed = true; // Modo Soro: pressing Publish is the review
   try {
     const { pb } = await requireUser();
     const status = str(f, "status");
