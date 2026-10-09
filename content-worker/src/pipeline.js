@@ -384,7 +384,7 @@ export async function processContentJob(pb, job, deps) {
         ...editorial.map((e) => e.value),
         ...specifics.filter((s) => s.severity === "blocker").map((s) => s.value),
       ];
-      if (scrubTargets.length && scrubs < 2) {
+      if (scrubTargets.length && scrubs < 3) {
         const scrub = scrubSentences(content, scrubTargets);
         if (scrub.removed.length && scrub.markdown.trim() !== String(content).trim()) {
           scrubs++;
@@ -395,7 +395,18 @@ export async function processContentJob(pb, job, deps) {
         }
       }
       if (cycle >= autoCycles) {
-        // Revision limit reached: hand to a human. BLOCKED content cannot be approved.
+        // Modo Soro: last pass — remove what is still flagged and hand the post
+        // over as ready (score + notes visible) instead of parking it.
+        const onlyClaims = !structure.languageMismatch && structure.h1 === 1 && duplicate.level !== "severe";
+        if (verdict.status === "BLOCKED" && onlyClaims && scrubTargets.length) {
+          const scrub = scrubSentences(content, scrubTargets);
+          if (scrub.removed.length) {
+            const version = await createVersion(pb, article, { title: article.title, content: scrub.markdown }, { changeType: "ai_revision", reason: `Auto-clean (final): removed ${scrub.removed.length} unconfirmed sentence(s): ${scrub.removed.map((r) => r.slice(0, 80)).join(" | ").slice(0, 1400)}`, label: "auto-clean" });
+            await saveState({ content: scrub.markdown, current_version: version, status: "awaiting_approval", qa_status: "NEEDS_REVISION", fact_check_status: "issues", ...(() => { const rk = currentRisk(scrub.markdown, claims.filter((c) => !c.blocking), { verifiedFacts: context.verified_facts }); return { high_risk: rk.high_risk, risk_categories: rk.categories, flags: [...flags].filter((f) => (f !== "HIGH_RISK_REVIEW_REQUIRED" || rk.high_risk) && f !== "UNSUPPORTED_BUSINESS_CLAIM") }; })() });
+            await logActivity(pb, { article, action: "AUTO_CLEANED", metadata: { version, removed: scrub.removed.length, final: true } });
+            break;
+          }
+        }
         await saveState({ status: verdict.status === "BLOCKED" ? "needs_revision" : "awaiting_approval" });
         break;
       }
