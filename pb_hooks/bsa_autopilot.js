@@ -694,7 +694,8 @@ function internalExecute(body) {
     const why = autoPublishBlockers(a);
     if (why.length) L.fail(409, "NOT_SAFE", "Not safe to auto-publish: " + why.join("; "));
     if ((policy.allowed_environments || []).indexOf(website.publishing_environment) === -1) L.fail(409, "ENVIRONMENT_NOT_ALLOWED", "Publishing environment " + website.publishing_environment + " is not allowed.");
-    const approved = L.approveArticle(actor, { articleId: a.id });
+    // The auto-publish rule above already vetted QA notes; high-risk posts never get here.
+    const approved = L.approveArticle(actor, { articleId: a.id, acknowledgeWarnings: true });
     const prov = Object.assign({}, approved.provenance || a.provenance || {}, { auto_published_by_policy: true, auto_publish_policy_version: policy.version, auto_publish_action: action.id });
     L.updateRec("articles", a.id, { provenance: prov });
     L.logActivity($app, { organization: website.organization, client: website.client, website: website.id, user: actor.id, action: "ARTICLE_AUTO_APPROVED", entity_type: "article", entity_id: a.id, metadata: { via: "autopilot", rule: "auto_publish_safe", policy_version: policy.version, autopilot_action: action.id } });

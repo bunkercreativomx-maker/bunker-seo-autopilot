@@ -23,6 +23,15 @@ export async function recoverStaleJobs(pb, { staleMs = 30 * 60_000, now = Date.n
   return recovered;
 }
 
+// A PocketBase request that never answers leaves the poll loop parked forever: queued
+// jobs are never claimed and nothing is logged, so the worker looks healthy for days.
+// The watchdog only covers the POLL phase (never a long content job) and exits so the
+// container's RestartPolicy gives us a fresh session. budgetMs <= 0 disables it.
+export function pollWatchdogExpired({ now, pollStartedAt, inPoll, budgetMs }) {
+  if (!inPoll || !budgetMs || budgetMs <= 0) return false;
+  return now - pollStartedAt > budgetMs;
+}
+
 export async function runWorker({ env = process.env, logger = console } = {}) {
   const config = loadContentConfig(env);
   const provider = createAIProvider(config);
@@ -30,15 +39,31 @@ export async function runWorker({ env = process.env, logger = console } = {}) {
   const pb = await createWorkerClient(env.PB_URL || "http://127.0.0.1:8096");
   await authenticate(pb, env.PB_ADMIN_EMAIL, env.PB_ADMIN_PASSWORD);
   const interval = Math.max(250, Number.parseInt(env.POLL_INTERVAL_MS || "4000", 10));
+  const watchdogMs = Number.parseInt(env.POLL_WATCHDOG_MS || "600000", 10) || 0;
   const oneShot = env.ONE_SHOT === "1";
   let stopping = false;
   process.once("SIGINT", () => { stopping = true; });
   process.once("SIGTERM", () => { stopping = true; });
   logger.log(`[content-worker] ${WORKER_VERSION} authenticated; provider=${config.provider} research=${researchProvider.name} models=${JSON.stringify(config.models)} poll=${interval}ms`);
   await recoverStaleJobs(pb, { logger }).catch((e) => logger.error(`[content-worker] stale recovery failed: ${e.message}`));
+  let inPoll = false;
+  let pollStartedAt = Date.now();
+  let watchdog = null;
+  if (!oneShot && watchdogMs > 0) {
+    watchdog = setInterval(() => {
+      if (!pollWatchdogExpired({ now: Date.now(), pollStartedAt, inPoll, budgetMs: watchdogMs })) return;
+      logger.error(`[content-worker] poll watchdog: no answer from PocketBase for ${Math.round((Date.now() - pollStartedAt) / 1000)}s; exiting so the container restarts`);
+      clearInterval(watchdog);
+      process.exit(1);
+    }, Math.min(60_000, Math.max(5_000, Math.floor(watchdogMs / 4))));
+    if (watchdog.unref) watchdog.unref();
+  }
   do {
     try {
-      const job = await claimNextJob(pb);
+      inPoll = true;
+      pollStartedAt = Date.now();
+      let job = null;
+      try { job = await claimNextJob(pb); } finally { inPoll = false; }
       if (job) {
         logger.log(`[content-worker] claimed job ${job.id} mode=${job.mode} article=${job.article}`);
         const result = await processContentJob(pb, job, { provider, researchProvider, config, logger });
@@ -50,6 +75,7 @@ export async function runWorker({ env = process.env, logger = console } = {}) {
     }
     if (!oneShot && !stopping) await sleep(interval);
   } while (!oneShot && !stopping);
+  if (watchdog) clearInterval(watchdog);
 }
 
 const isEntryPoint = process.argv[1] && new URL(import.meta.url).pathname === process.argv[1];

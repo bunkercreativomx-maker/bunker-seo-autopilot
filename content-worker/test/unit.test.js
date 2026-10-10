@@ -11,6 +11,7 @@ import {
 } from "../src/checks.js";
 import { classifySource, collectExternalSources, dedupeSources, fetchSource, normalizeSourceUrl, rankSources, NullResearchProvider, ResearchUnavailableError } from "../src/research.js";
 import { runBrief, runDraft, runOutline } from "../src/stages.js";
+import { pollWatchdogExpired } from "../worker.js";
 
 // ------------------------------------------------------------------ fixtures
 const T = { organization: "org1", client: "cliA", website: "webA" };
@@ -310,4 +311,12 @@ test("writer structured response: requires H1 + substantive markdown", async () 
   await assert.rejects(runDraft(stageCtx({ title: "t", content_markdown: "x ".repeat(200), used_evidence_ids: [], notes_for_editor: "" }), ctx, { do_not_claim: [], questions: [] }, {}, {}), /H1/);
   const ok = await runDraft(stageCtx({ title: "t", content_markdown: `# T\n\n${"texto ".repeat(60)}`, used_evidence_ids: [], notes_for_editor: "" }), ctx, { do_not_claim: [], questions: [] }, {}, {});
   assert.match(ok.content_markdown, /^# T/);
+});
+
+test("poll watchdog: only fires on a stalled poll phase, never during a long job", () => {
+  const base = { now: 1_000_000, pollStartedAt: 1_000_000, inPoll: true, budgetMs: 600_000 };
+  assert.equal(pollWatchdogExpired(base), false); // just started polling
+  assert.equal(pollWatchdogExpired({ ...base, now: 1_000_000 + 600_001 }), true); // PocketBase never answered
+  assert.equal(pollWatchdogExpired({ ...base, now: 1_000_000 + 900_000, inPoll: false }), false); // busy writing a post
+  assert.equal(pollWatchdogExpired({ ...base, now: 1_000_000 + 900_000, budgetMs: 0 }), false); // disabled
 });
