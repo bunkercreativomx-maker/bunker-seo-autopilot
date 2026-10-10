@@ -95,7 +95,7 @@ main:has(.hub){max-width:none;padding:0}
 .bh-cta-actions{display:flex;gap:14px;flex-wrap:wrap}
 .bh-foot{background:#fff;border-top:1px solid #f3f4f6;padding:64px 0 28px;color:var(--b-primary)}
 .bh-foot-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:48px}
-.bh-foot-logo{width:250px;height:auto;display:block;margin-bottom:22px}
+.bh-foot-logo{width:var(--b-foot-logo,250px);height:auto;display:block;margin-bottom:22px}
 .bh-foot p{font-weight:500;line-height:1.65;margin:0 0 18px}
 .bh-foot h3{font-size:1.5rem;font-weight:700;margin:0 0 22px}
 .bh-foot ul{list-style:none;margin:0;padding:0}

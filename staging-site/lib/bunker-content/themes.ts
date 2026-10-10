@@ -22,6 +22,8 @@ export type HubTheme = {
   heroAccent?: string;
   // Fallback glyph used when a post has no featured image (default ❄).
   icon?: string;
+  // Square logos need a smaller footer size; defaults to 250px.
+  footLogoWidth?: string;
   footerBlurb: string;
   email?: string;
   area?: string;
@@ -35,6 +37,7 @@ export type HubTheme = {
 
 const EMPIRE = "https://weneedair.com";
 const TLALOC = "https://www.tlalocsolfuturo.com";
+const BC = "https://bunkercreativomx.com";
 
 const THEMES: Record<string, HubTheme> = {
   // Empire Refrigeration - weneedair.com
@@ -116,6 +119,47 @@ const THEMES: Record<string, HubTheme> = {
     ctaText: "Cotiza tu sistema solar con tu recibo de CFE y recibe una propuesta con retorno de inversi\u00f3n claro.",
     author: "Equipo SolFuturo",
     readMore: "Leer m\u00e1s",
+  },
+
+  // Bunker Creativo - bunkercreativomx.com (agencia web/redes, Cd. Juárez + El Paso)
+  xjkrxrh3l7mpv72: {
+    logo: `${BC}/assets/img/logo.png`,
+    logoAlt: "Bunker Creativo - Redes sociales y páginas web",
+    colors: { primary: "#0d1430", accent: "#ff5b1f", hot: "#c93d0a", bar: "#c8ff2e" },
+    nav: [
+      { label: "Inicio", href: `${BC}/#top` },
+      { label: "Páginas web", href: `${BC}/#web` },
+      { label: "Redes", href: `${BC}/#paquetes` },
+      { label: "Coroplast", href: `${BC}/#coroplast` },
+      { label: "Imprenta", href: `${BC}/#imprenta` },
+      { label: "Blog", href: `${BC}/blog` },
+      { label: "Contacto", href: `${BC}/#contacto` },
+    ],
+    phoneLabel: "Cotiza por WhatsApp: 656 682 5587",
+    schedule: { label: "Cotizar por WhatsApp", href: "https://wa.me/5216566825587?text=Hola%20Bunker%2C%20quiero%20cotizar" },
+    book: { label: "WhatsApp", href: "https://wa.me/5216566825587?text=Hola%20Bunker%2C%20quiero%20cotizar" },
+    heroTitle: ["Guías de web y redes", "para tu negocio"],
+    heroSub: "Ideas prácticas de páginas web, redes sociales, branding e imprenta para negocios de El Paso, Ciudad Juárez y todo México.",
+    heroBg: "linear-gradient(135deg,#0d1430 0%,#18244f 100%)",
+    heroAccent: "#c8ff2e",
+    icon: "✦",
+    footLogoWidth: "110px",
+    footerBlurb: "Redes sociales y páginas web para El Paso, Juárez y todo México. Imprenta y coroplast en Cd. Juárez.",
+    email: "bunkercreativomx@gmail.com",
+    area: "El Paso, Ciudad Juárez y todo México",
+    quickLinks: [
+      { label: "Inicio", href: `${BC}/#top` },
+      { label: "Páginas web", href: `${BC}/#web` },
+      { label: "Redes", href: `${BC}/#paquetes` },
+      { label: "Coroplast", href: `${BC}/#coroplast` },
+      { label: "Imprenta", href: `${BC}/#imprenta` },
+      { label: "Blog", href: `${BC}/blog` },
+      { label: "Contacto", href: `${BC}/#contacto` },
+    ],
+    ctaTitle: "¿Quieres que tu negocio se vea premium?",
+    ctaText: "Cotiza tu página web, tus redes sociales o tu imprenta por WhatsApp y arrancamos esta semana.",
+    author: "Bunker Creativo",
+    readMore: "Leer más",
   },
 };
 
