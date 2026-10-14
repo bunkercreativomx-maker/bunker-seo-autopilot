@@ -32,6 +32,21 @@ export function pollWatchdogExpired({ now, pollStartedAt, inPoll, budgetMs }) {
   return now - pollStartedAt > budgetMs;
 }
 
+// PocketBase superuser tokens expire (default 1 day). An expired token does NOT error on
+// list calls: the request is treated as anonymous and `status = "queued"` returns 0 items,
+// so the worker idles "healthy" while the queue stalls. Re-auth before the token expires.
+export function tokenNeedsRefresh(token, { now = Date.now(), marginMs = 60 * 60_000 } = {}) {
+  try {
+    const part = String(token || "").split(".")[1];
+    if (!part) return true;
+    const payload = JSON.parse(Buffer.from(part.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
+    if (!payload || typeof payload.exp !== "number") return true;
+    return payload.exp * 1000 - now < marginMs;
+  } catch {
+    return true;
+  }
+}
+
 export async function runWorker({ env = process.env, logger = console } = {}) {
   const config = loadContentConfig(env);
   const provider = createAIProvider(config);
@@ -63,7 +78,13 @@ export async function runWorker({ env = process.env, logger = console } = {}) {
       inPoll = true;
       pollStartedAt = Date.now();
       let job = null;
-      try { job = await claimNextJob(pb); } finally { inPoll = false; }
+      try {
+        if (tokenNeedsRefresh(pb.authStore.token)) {
+          await authenticate(pb, env.PB_ADMIN_EMAIL, env.PB_ADMIN_PASSWORD);
+          logger.log("[content-worker] re-authenticated (token refresh)");
+        }
+        job = await claimNextJob(pb);
+      } finally { inPoll = false; }
       if (job) {
         logger.log(`[content-worker] claimed job ${job.id} mode=${job.mode} article=${job.article}`);
         const result = await processContentJob(pb, job, { provider, researchProvider, config, logger });

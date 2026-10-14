@@ -11,7 +11,7 @@ import {
 } from "../src/checks.js";
 import { classifySource, collectExternalSources, dedupeSources, fetchSource, normalizeSourceUrl, rankSources, NullResearchProvider, ResearchUnavailableError } from "../src/research.js";
 import { runBrief, runDraft, runOutline } from "../src/stages.js";
-import { pollWatchdogExpired } from "../worker.js";
+import { pollWatchdogExpired, tokenNeedsRefresh } from "../worker.js";
 
 // ------------------------------------------------------------------ fixtures
 const T = { organization: "org1", client: "cliA", website: "webA" };
@@ -319,4 +319,14 @@ test("poll watchdog: only fires on a stalled poll phase, never during a long job
   assert.equal(pollWatchdogExpired({ ...base, now: 1_000_000 + 600_001 }), true); // PocketBase never answered
   assert.equal(pollWatchdogExpired({ ...base, now: 1_000_000 + 900_000, inPoll: false }), false); // busy writing a post
   assert.equal(pollWatchdogExpired({ ...base, now: 1_000_000 + 900_000, budgetMs: 0 }), false); // disabled
+});
+
+test("token refresh: re-auth before the superuser token expires (expired token lists 0 queued jobs silently)", () => {
+  const jwt = (exp) => `h.${Buffer.from(JSON.stringify({ exp })).toString("base64url")}.s`;
+  const now = 1_700_000_000_000;
+  assert.equal(tokenNeedsRefresh(jwt(now / 1000 + 86_400), { now }), false); // fresh 1-day token
+  assert.equal(tokenNeedsRefresh(jwt(now / 1000 + 600), { now }), true); // expires in 10 min
+  assert.equal(tokenNeedsRefresh(jwt(now / 1000 - 1), { now }), true); // already expired
+  assert.equal(tokenNeedsRefresh("", { now }), true);
+  assert.equal(tokenNeedsRefresh("garbage", { now }), true);
 });
