@@ -49,7 +49,7 @@ Rules:
 - Never default to "a technician with a machine" unless the post is about repairing/installing equipment.
 - Money/credit/legal topics: show people and a warm conversation or the life goal the money enables, never piles of cash, bank logos or contracts with readable text.
 - Software/business topics: show the business moment the software helps with (customers, staff, counter, owner); screens only seen from the side or blurred.
-- Product posts (printing, signage, apparel, cards, stickers, banners, merchandise): the finished product must be the hero and instantly recognizable for what it is — e.g. a fanned stack of printed business cards with a colorful design, a large vinyl banner being hung on a storefront, DTF-printed t-shirts on a rack. Blank white cards or plain paper read as "nothing"; printed items should carry colors, shapes, logo-like marks or out-of-focus print, never legible words.
+- Product posts (printing, signage, apparel, cards, stickers, banners, merchandise): the finished product must be the hero and instantly recognizable for what it is — describe the product exactly as a customer would recognize it. Business cards = standard 3.5x2 inch cards on thick white/cream/black stock with a classic layout: a small logo mark, one bold name line and a few thin lines of contact details (soft, out of focus, unreadable) — shown being handed over, held between two fingers, or as a neat stack in a box; NOT art cards, postcards, colorful illustrations or blank paper. Banners = large printed vinyl being hung on a storefront; DTF shirts = printed tees on a rack. Blank items read as "nothing".
 - Avoid anything that needs readable text: no signs, labels, screens facing camera, or documents with visible writing. Out-of-focus or abstract print is fine.
 - If human_request is present, follow it.
 Answer in English.`;
@@ -69,7 +69,7 @@ const DIRECTOR_SCHEMA = {
 
 const QA = `You check a blog featured photo before it goes live. Be strict.
 fits=false if the photo does not clearly relate to the post topic and audience (wrong subject, wrong kind of people, wrong country look).
-garbled_text=true if readable or pseudo-readable letters, words, fake text, labels, signs, logos or numbers are visible. Out-of-focus, abstract or indistinct print on products is fine.
+garbled_text=true if readable letters, words, labels, signs, logos or numbers are visible, or if fake text is sharp enough that a reader would try to read it. Soft, out-of-focus, indistinct print on products (e.g. the name/contact lines of a business card) is fine and expected.
 fits=false also when the post is about a product (cards, banners, shirts, stickers, signs) and that product is not clearly recognizable in the photo (blank paper or generic samples do not count).
 artifacts=true for deformed hands/faces, melted objects, impossible machines, or an obviously fake CGI look.
 reason: one short sentence on what to fix.`;
@@ -96,7 +96,7 @@ export function photoPrompt(brief, ctx) {
     `Setting: ${clean(brief.setting, 240)}.`,
     `Light and mood: ${clean(brief.light_mood, 160)}. Framing: ${clean(brief.framing, 160)}.`,
     "Natural skin texture, real-world imperfections, believable everyday details, not staged stock, not CGI.",
-    "No legible text, letters, numbers, signs, labels, logos, brand names or watermarks anywhere; printed items may show colors, abstract graphics or out-of-focus print, never readable words; screens are blank or out of focus.",
+    "Printed products keep their real layout (a business card: small logo mark, one bold name line, thin contact lines) but every word is soft, out of focus and unreadable; no legible text, letters, numbers, real logos, brand names or watermarks anywhere; screens are blank or out of focus.",
   ].filter(Boolean).join(" ");
 }
 
