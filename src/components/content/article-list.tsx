@@ -91,13 +91,16 @@ export function ArticleTable({ articles, showClient = true, showWebsite = true }
 
 export function StatusSummary({ articles, hrefFor }: { articles: Article[]; hrefFor: (group: string) => string }) {
   return (
-    <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-6">
-      {STATUS_GROUPS.map((g) => (
-        <Link key={g.key} href={hrefFor(g.key)} className="rounded-xl border border-slate-200 bg-white p-3 hover:border-slate-300">
-          <p className="text-xs text-slate-500">{g.label}</p>
-          <p className="text-2xl font-semibold text-slate-900">{articles.filter((a) => g.statuses.includes(a.status)).length}</p>
-        </Link>
-      ))}
+    <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-3 sm:gap-3 sm:overflow-visible sm:px-0 sm:pb-0 md:grid-cols-6">
+      {STATUS_GROUPS.map((g) => {
+        const n = articles.filter((a) => g.statuses.includes(a.status)).length;
+        return (
+          <Link key={g.key} href={hrefFor(g.key)} className={`shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 hover:border-slate-300 sm:p-3 ${n === 0 ? "hidden sm:block" : ""}`}>
+            <p className="whitespace-nowrap text-xs text-slate-500">{g.label}</p>
+            <p className="text-xl font-semibold text-slate-900 sm:text-2xl">{n}</p>
+          </Link>
+        );
+      })}
     </div>
   );
 }

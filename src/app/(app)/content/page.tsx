@@ -32,12 +32,7 @@ export default async function ContentDashboardPage({ searchParams }: { searchPar
   };
   const select = "w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm sm:w-auto sm:max-w-[16rem]";
 
-  return (
-    <div>
-      <PageHeader title="Content" description="Evidence-based content. Drafts → QA → human approval → Publish (manual, confirmed, verified)." />
-      <StatusSummary articles={base} hrefFor={hrefFor} />
-      <Card className="mb-4">
-        <CardBody>
+  const filters = (
           <form className="grid grid-cols-2 items-end gap-2 sm:flex sm:flex-wrap sm:gap-3" method="get">
             <select name="client" defaultValue={client ?? ""} className={select}><option value="">All clients</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.business_name}</option>)}</select>
             <select name="website" defaultValue={website ?? ""} className={select}><option value="">All websites</option>{websites.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
@@ -47,6 +42,19 @@ export default async function ContentDashboardPage({ searchParams }: { searchPar
             <Button type="submit" variant="secondary">Filter</Button>
             <Link href="/content" className="text-sm text-slate-500 hover:text-slate-700">Reset</Link>
           </form>
+  );
+
+  return (
+    <div>
+      <PageHeader title="Content" description="Evidence-based content. Drafts → QA → human approval → Publish (manual, confirmed, verified)." />
+      <StatusSummary articles={base} hrefFor={hrefFor} />
+      <details className="group mb-4 sm:hidden">
+        <summary className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700">Filters ▾</summary>
+        <div className="mt-2 rounded-xl border border-slate-200 bg-white p-3">{filters}</div>
+      </details>
+      <Card className="mb-4 hidden sm:block">
+        <CardBody>
+          {filters}
         </CardBody>
       </Card>
       <ArticleTable articles={articles} />
