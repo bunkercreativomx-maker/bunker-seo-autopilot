@@ -30,7 +30,7 @@ export default async function ContentDashboardPage({ searchParams }: { searchPar
     const params = new URLSearchParams(Object.entries({ client, website, type, language, group: g }).filter(([, v]) => v) as Array<[string, string]>);
     return `/content?${params.toString()}`;
   };
-  const select = "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm";
+  const select = "w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm sm:w-auto sm:max-w-[16rem]";
 
   return (
     <div>
@@ -38,7 +38,7 @@ export default async function ContentDashboardPage({ searchParams }: { searchPar
       <StatusSummary articles={base} hrefFor={hrefFor} />
       <Card className="mb-4">
         <CardBody>
-          <form className="flex flex-wrap items-end gap-3" method="get">
+          <form className="grid grid-cols-2 items-end gap-2 sm:flex sm:flex-wrap sm:gap-3" method="get">
             <select name="client" defaultValue={client ?? ""} className={select}><option value="">All clients</option>{clients.map((c) => <option key={c.id} value={c.id}>{c.business_name}</option>)}</select>
             <select name="website" defaultValue={website ?? ""} className={select}><option value="">All websites</option>{websites.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
             <select name="type" defaultValue={type ?? ""} className={select}><option value="">All types</option>{(Object.keys(CONTENT_TYPE_LABELS) as ContentTypeKey[]).map((k) => <option key={k} value={k}>{CONTENT_TYPE_LABELS[k]}</option>)}</select>

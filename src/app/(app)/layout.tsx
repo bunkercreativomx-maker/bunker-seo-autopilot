@@ -17,10 +17,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar orgName={orgName} />
+    <div className="flex min-h-dvh flex-col md:flex-row">
+      <Sidebar orgName={orgName} mobileRight={<UserMenu name={user.name ?? ""} email={user.email} role={user.role} />} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-6">
+        <header className="hidden h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-6 md:flex">
           <div className="flex items-center gap-3">
             <span className="hidden text-sm font-medium text-slate-500 sm:inline">{orgName}</span>
           </div>
@@ -42,7 +42,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <UserMenu name={user.name ?? ""} email={user.email} role={user.role} />
           </div>
         </header>
-        <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+        <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 sm:py-6 lg:px-8">{children}</main>
       </div>
     </div>
   );
