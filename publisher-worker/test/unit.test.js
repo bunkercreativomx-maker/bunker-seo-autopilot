@@ -151,3 +151,17 @@ test("public schema: Phase 4 [{type,reason,jsonld}] is unwrapped, reason never p
   assert.equal(publicSchemaFor(null, "https://x"), null);
   assert.equal(publicSchemaFor([{ type: "Service", reason: "r" }], "https://x"), null);
 });
+
+test("sitemap verification is soft (cache lag) and cache-busted; the page/API checks decide", async () => {
+  const { PublisherAdapter } = await import("../src/adapters/base.js");
+  const seen = [];
+  class A extends PublisherAdapter { async http(url) { seen.push(url); return { status: 200, text: "<urlset><url><loc>https://x.com/blog/other</loc></url></urlset>" }; } }
+  const ctx = { website: { base_url: "https://x.com", publishing_configuration: { sitemap_url: "https://x.com/blog/sitemap.xml", verify_sitemap: true } } };
+  const r = await new A().verifySitemap(ctx, { url: "https://x.com/blog/new-post", expect: "live" });
+  assert.equal(r.ok, true);
+  assert.equal(r.check.present, false);
+  assert.match(r.check.warning, /not yet listed/);
+  assert.match(seen[0], /sitemap\.xml\?bc=/);
+  class B extends PublisherAdapter { async http() { return { status: 503, text: "" }; } }
+  assert.equal((await new B().verifySitemap(ctx, { url: "https://x.com/blog/new-post", expect: "live" })).ok, true);
+});

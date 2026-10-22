@@ -34,11 +34,15 @@ export class PublisherAdapter {
     const cfg = ctx.website.publishing_configuration || {};
     if (cfg.verify_sitemap === false) return { ok: true, check: { sitemap: "skipped" } };
     const sm = cfg.sitemap_url || String(ctx.website.base_url).replace(/\/+$/, "") + "/sitemap.xml";
-    const res = await this.http(sm, { method: "GET", headers: { accept: "application/xml,text/xml" } }, ctx);
-    if (res.status !== 200) return { ok: false, check: { sitemap: sm, status: res.status }, reason: `Sitemap returned ${res.status}` };
+    // Cache-bust: CDNs (Vercel/Cloudflare) serve a sitemap for minutes after a publish.
+    const fetchUrl = sm + (sm.includes("?") ? "&" : "?") + "bc=" + Date.now().toString(36);
+    const res = await this.http(fetchUrl, { method: "GET", headers: { accept: "application/xml,text/xml", "cache-control": "no-cache" } }, ctx);
+    // The sitemap is a lagging, cached artifact: it never decides whether a post is live.
+    // The page + public API checks do. A missing/stale sitemap is recorded as a warning only.
+    if (res.status !== 200) return { ok: true, check: { sitemap: sm, status: res.status, warning: `Sitemap returned ${res.status}` } };
     const present = res.text.includes(`<loc>${xmlEscape(url)}</loc>`);
-    const ok = expect === "live" ? present : !present;
-    return { ok, check: { sitemap: sm, present }, reason: ok ? "" : (present ? "URL still listed in sitemap" : "URL missing from sitemap") };
+    const expected = expect === "live" ? present : !present;
+    return { ok: true, check: { sitemap: sm, present, ...(expected ? {} : { warning: present ? "URL still listed in sitemap (cache lag)" : "URL not yet listed in sitemap (cache lag)" }) } };
   }
 }
 

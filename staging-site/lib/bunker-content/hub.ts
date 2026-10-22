@@ -44,17 +44,19 @@ export async function getSite(id: string): Promise<SiteProfile | null> {
   return s;
 }
 
-async function pbFetch(id: string, params: Record<string, string>) {
+async function pbFetch(id: string, params: Record<string, string>, fresh = false) {
   const qs = new URLSearchParams({ website: id, fields: PUBLIC_FIELDS.join(","), ...params });
-  const res = await fetch(`${pbUrl()}/api/collections/published_content/records?${qs}`, { headers: { accept: "application/json" }, next: { tags: [`bunker-content:${id}`], revalidate: revalidate() } });
+  const res = await fetch(`${pbUrl()}/api/collections/published_content/records?${qs}`, fresh
+    ? { headers: { accept: "application/json" }, cache: "no-store" }
+    : { headers: { accept: "application/json" }, next: { tags: [`bunker-content:${id}`], revalidate: revalidate() } });
   if (!res.ok) throw new Error(`Content API returned ${res.status}`);
   const json = (await res.json()) as { items?: Record<string, unknown>[] };
   return json.items ?? [];
 }
 
-export async function listFor(id: string, limit = 100): Promise<PublicArticle[]> {
+export async function listFor(id: string, limit = 100, { fresh = false } = {}): Promise<PublicArticle[]> {
   if (!ID_RE.test(id)) return [];
-  return (await pbFetch(id, { filter: 'status = "published"', sort: "-published_at", perPage: String(Math.min(limit, 200)) })).map(pickPublic);
+  return (await pbFetch(id, { filter: 'status = "published"', sort: "-published_at", perPage: String(Math.min(limit, 200)) }, fresh)).map(pickPublic);
 }
 
 export async function getFor(id: string, slug: string): Promise<PublicArticle | null> {

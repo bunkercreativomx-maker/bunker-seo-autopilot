@@ -12,6 +12,9 @@ import { deriveSignals } from "./signals.js";
 import { decide, summarize, circuitGroup, localDate, verifiedTypesFrom } from "./decide.js";
 import { classifyError, retryable } from "./signals.js";
 const TEMPORARY_BLOCKS = new Set(["BUDGET_LIMIT", "PLAN_NOT_DUE", "PLAN_LIMIT"]);
+// Failure codes produced by bugs that later releases fixed (e.g. the approve hook now sends
+// acknowledgeWarnings). They must not pin an idempotency key as NOT_RETRYABLE forever.
+const FIXED_FAILURE_CODES = new Set(["WARNINGS_NOT_ACKNOWLEDGED", "VERIFICATION_FAILED"]);
 
 export const WORKER_VERSION = "bunker-seo-autopilot/0.7.0";
 export const MAX_CYCLES_PER_RUN = 20;
@@ -502,15 +505,17 @@ export class Engine {
     // A temporary policy block (daily/weekly budget, package not due yet) must not pin the
     // idempotency key forever: once today's decision is no longer blocked, retire the old
     // blocked action (skipped frees the unique index) and plan a fresh one.
-    if (live && live.status === "blocked" && TEMPORARY_BLOCKS.has(live.error_code) && !d.block_code) {
-      await this.col("autopilot_actions").update(live.id, { status: "skipped", error_message: `${live.error_message || ""} — superseded: limit cleared on ${this.ts().slice(0, 10)}`.slice(0, 1000), updated_at: this.ts() }, { requestKey: null });
+    const fixedFailure = (x) => x.status === "failed" && FIXED_FAILURE_CODES.has(x.error_code);
+    const staleNotRetryable = live && live.status === "blocked" && live.error_code === "NOT_RETRYABLE" && prior.some(fixedFailure) && !prior.some((x) => x.status === "failed" && !fixedFailure(x));
+    if (live && live.status === "blocked" && (TEMPORARY_BLOCKS.has(live.error_code) || staleNotRetryable) && !d.block_code) {
+      await this.col("autopilot_actions").update(live.id, { status: "skipped", error_message: `${live.error_message || ""} — superseded: ${staleNotRetryable ? "failure cause fixed" : "limit cleared"} on ${this.ts().slice(0, 10)}`.slice(0, 1000), updated_at: this.ts() }, { requestKey: null });
       live = null;
     }
     if (live) return { action: live, reused: true };
     const recommended = observe && prior.find((x) => x.status === "skipped" && x.error_code === "OBSERVE_MODE");
     if (recommended) return { action: recommended, reused: true };
     const cancelled = prior.find((x) => x.status === "cancelled");
-    const failures = prior.filter((x) => x.status === "failed");
+    const failures = prior.filter((x) => x.status === "failed" && !FIXED_FAILURE_CODES.has(x.error_code));
     let block = d.block_code ? { code: d.block_code, message: d.reason } : null;
     if (!block && cancelled) block = { code: "CANCELLED_BY_USER", message: "A human cancelled this action before; Autopilot does not recreate it automatically." };
     if (!block && failures.length) {

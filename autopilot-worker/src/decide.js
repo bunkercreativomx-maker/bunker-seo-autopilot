@@ -317,7 +317,7 @@ export function decide(signals, ctx) {
     }
   }
   for (const s of byType("PUBLICATION_UNVERIFIED")) {
-    plan({ signal: s, decision_type: "VERIFY_PUBLICATION", priority: "high", score: 60, rule: "publication.verification_required", reason: "Publication needs verification.", evidence: s.evidence }, { action_type: "VERIFY_PUBLICATION", target_type: "article", target_id: s.source_record, idempotency_key: `verify:${s.source_record}:${s.evidence.publication_updated || ""}` });
+    plan({ signal: s, decision_type: "VERIFY_PUBLICATION", priority: "high", score: 60, rule: "publication.verification_required", reason: "Publication needs verification.", evidence: s.evidence }, { action_type: "VERIFY_PUBLICATION", target_type: "article", target_id: s.source_record, idempotency_key: `verify:${s.source_record}:${new Date().toISOString().slice(0, 10)}` });
   }
 
   // 5. Analytics feedback — real data only (signals exist only when GSC has rows).
