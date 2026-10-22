@@ -43,6 +43,9 @@ function strs(v, max) { return arr(v, max) && v.every((x) => typeof x === "strin
 function keepKnown(ids, allowed) { return Array.isArray(ids) ? ids.filter((id) => typeof id === "string" && allowed.has(id)) : []; }
 function refsKnown(ids, allowed) { return Array.isArray(ids) && ids.every((id) => typeof id === "string" && allowed.has(id)); }
 
+// Audience-angle rule (Dan Martell): sell differently to each audience. Framing only — never a source of facts.
+const AUDIENCE_ANGLE = `AUDIENCE ANGLE: identify the main reader of this keyword and frame benefits for THAT reader (if you sell to everyone the same way you sell to no one). Busy / affluent owners or customers → time saved and hassle removed. Students / young people → their goal or dream. Men → what success LOOKS like (visible result, status). Women → how success FEELS (confidence, peace of mind). Products/services for kids → speak to the parents. Parents → a break, less stress. Retirees/pensioners → security, peace of mind, helping family. Small-business owners → time back, control, looking professional (not cheap). This changes framing, examples, headings and CTA wording only; it NEVER adds business facts, promises or numbers that are not F* facts, and never stereotypes or excludes readers.`;
+
 function languageLine(context) {
   const name = { es: "Spanish (español)", en: "English" }[String(context.meta.language).split("-")[0]] || context.meta.language;
   return `OUTPUT LANGUAGE: Write all human-readable text in ${name}. Do not mix languages.`;
@@ -86,6 +89,8 @@ ${EVIDENCE_RULES}
 Task: analyze the evidence for a ${context.meta.content_type} targeting "${context.meta.primary_keyword}"${context.meta.target_location ? ` in ${context.meta.target_location}` : ""}.
 Answer: what the searcher wants; the questions the content must answer; which facts are required and whether each is available (cite evidence ids) or missing; what already exists on the client's site; which claims need external sources; which internal pages (L* ids) are relevant; content gaps; what must NOT be claimed because it is unverified or missing (be explicit, e.g. specific prices, financing terms, warranties, certifications, guarantees not in F*); risks, and whether the topic is medical/legal/financial/safety/regulated.
 research_sufficiency: "insufficient" if the content cannot be written responsibly with this evidence (e.g. time-sensitive regulations/prices/statistics with no external sources); "limited" if it can be written by omitting unsupported specifics; "sufficient" otherwise. Set time_sensitive=true if the topic depends on current rules, prices, incentives or statistics.
+audience + recommended_angle: name the main reader segment and the benefit framing for that segment.
+${AUDIENCE_ANGLE}
 Only reference evidence ids that exist. Never invent sources, facts or URLs.
 ${languageLine(context)}`,
     input: evidenceBlock(context),
@@ -142,6 +147,8 @@ Rules:
 - CTA: only verified contact details (F* phone/email) and no promises that are not F* facts. If there are no verified contacts, a neutral contact CTA without promises.
 - Do not plan sections whose only purpose is to discuss unverified business topics (financing, warranties, certifications, case studies, testimonials, prices). If the information is not in F*, leave the topic out.
 - Do not plan editor notes, suggested forms, reference lists or reader warnings about the business.
+- audience/angle/cta: apply the audience angle below.
+${AUDIENCE_ANGLE}
 ${voiceLine(context)}
 ${languageLine(context)}`,
     input: evidenceBlock(context, { extra: { research } }),
@@ -238,6 +245,7 @@ function writerRules(context) {
 - Internal links: use markdown links to the exact URLs of L* candidates where they genuinely help the reader. Vary anchors; never repeat the same anchor excessively; do not link irrelevant pages.
 - No keyword stuffing, generic filler, repetitive intros, or empty phrases. Natural, useful, specific.
 - Markdown only: start with "# " H1, then "##"/"###" sections. No HTML, no front matter, no images.
+- ${AUDIENCE_ANGLE}
 ${voiceLine(context)}
 ${languageLine(context)}`;
 }
