@@ -32,7 +32,22 @@ export default async function WebsitesPage() {
           }
         />
       ) : (
-        <Card>
+        <>
+        {/* Phone: one card per website */}
+        <ul className="space-y-2 sm:hidden">
+          {websites.map((w) => (
+            <li key={w.id}>
+              <Link href={`/websites/${w.id}`} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 active:bg-slate-50">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-900">{w.name}</p>
+                  <p className="truncate text-xs text-slate-500">{w.domain}</p>
+                </div>
+                <Badge tone={statusTone(w.status)}>{w.status}</Badge>
+              </Link>
+            </li>
+          ))}
+        </ul>
+        <Card className="hidden sm:block">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50">
@@ -70,6 +85,7 @@ export default async function WebsitesPage() {
             </table>
           </div>
         </Card>
+        </>
       )}
     </div>
   );

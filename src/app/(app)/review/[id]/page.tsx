@@ -31,7 +31,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
     <div className="mx-auto max-w-4xl">
       <div className="mb-4 flex items-center justify-between text-sm">
         <Link href="/today" className="text-slate-500 hover:text-slate-800">← Today</Link>
-        <Link href={`/articles/${a.id}?advanced=1`} className="text-xs text-slate-400 hover:text-slate-600">Advanced view</Link>
+        <Link href={`/articles/${a.id}?advanced=1`} className="text-xs text-slate-500 hover:text-slate-700">Advanced view</Link>
       </div>
       <ReviewScreen
         canEdit={canWrite(user.role)}

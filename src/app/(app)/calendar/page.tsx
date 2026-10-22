@@ -63,7 +63,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
       </header>
 
       {/* Clients / packages */}
-      <div className="flex flex-wrap gap-2">
+      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 [&>*]:shrink-0">
         <Link href={q(key(y, m), "")} className={cn("rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset", !site ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50")}>All clients</Link>
         {cal.websites.map((w) => {
           const info = cal.sites.find((s) => s.id === w.id);
@@ -86,11 +86,15 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
           {cells.map((d, i) => {
             const list = d ? byDay.get(d) || [] : [];
             return (
-              <div key={i} className={cn("min-h-28 border-b border-r border-slate-100 p-1.5 [&:nth-child(7n)]:border-r-0", !d && "bg-slate-50/60")}>
+              <div key={i} className={cn("min-h-14 border-b sm:min-h-28 border-r border-slate-100 p-1.5 [&:nth-child(7n)]:border-r-0", !d && "bg-slate-50/60")}>
                 {d && (
                   <>
                     <div className={cn("mb-1 flex h-6 w-6 items-center justify-center rounded-full text-xs", d === cal.today ? "bg-sky-500 font-semibold text-white" : "text-slate-500")}>{d}</div>
-                    <div className="space-y-1">
+                    {/* Phone: dots only — the readable list is below the grid */}
+                    <div className="flex flex-wrap gap-0.5 sm:hidden">
+                      {list.slice(0, 6).map((it, j) => <span key={j} className={cn("h-1.5 w-1.5 rounded-full", it.kind === "planned" ? "opacity-40" : "", color.get(it.websiteId))} />)}
+                    </div>
+                    <div className="hidden space-y-1 sm:block">
                       {list.slice(0, 4).map((it, j) => {
                         const inner = (
                           <span className={cn("flex items-center gap-1 truncate rounded-md px-1.5 py-1 text-[11px] leading-tight ring-1 ring-inset", CHIP[it.kind])} title={`${it.websiteName} — ${LABEL[it.kind]}: ${it.title}`}>
@@ -108,6 +112,32 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
             );
           })}
         </div>
+      </div>
+
+      {/* Phone agenda: readable list of the month */}
+      <div className="space-y-3 sm:hidden">
+        {[...byDay.entries()].filter(([, l]) => l.length).sort(([a], [b]) => a - b).map(([d, list]) => (
+          <div key={d} className="rounded-xl border border-slate-200 bg-white">
+            <div className={cn("flex items-center gap-2 border-b border-slate-100 px-3 py-2 text-xs font-semibold", d === cal.today ? "text-sky-700" : "text-slate-500")}>
+              <span className={cn("flex h-6 w-6 items-center justify-center rounded-full", d === cal.today ? "bg-sky-500 text-white" : "bg-slate-100")}>{d}</span>
+              {d === cal.today ? "Today" : null}
+            </div>
+            <ul className="divide-y divide-slate-100">
+              {list.map((it, j) => {
+                const row = (
+                  <div className="flex items-start gap-2 px-3 py-2.5">
+                    <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", color.get(it.websiteId))} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm leading-snug text-slate-900">{it.kind === "planned" ? "Planned post" : it.title}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{it.websiteName} · {LABEL[it.kind]}</p>
+                    </div>
+                  </div>
+                );
+                return <li key={j}>{it.articleId ? <Link href={`/review/${it.articleId}`} className="block active:bg-slate-50">{row}</Link> : row}</li>;
+              })}
+            </ul>
+          </div>
+        ))}
       </div>
 
       {/* Legend */}

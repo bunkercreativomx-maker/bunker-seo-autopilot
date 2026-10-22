@@ -40,7 +40,22 @@ export function ArticleTable({ articles, showClient = true, showWebsite = true }
   const th = "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500";
   const td = "px-4 py-3 text-sm text-slate-600 align-top";
   return (
-    <Card>
+    <>
+    {/* Phone: one card per post */}
+    <ul className="space-y-2 sm:hidden">
+      {articles.map((a) => (
+        <li key={a.id}>
+          <Link href={`/review/${a.id}`} className="block rounded-xl border border-slate-200 bg-white px-4 py-3 active:bg-slate-50">
+            <p className="text-sm font-semibold leading-snug text-slate-900">{a.title || a.primary_keyword || "Untitled draft"}</p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+              <Badge tone={articleTone(a.status)}>{ARTICLE_STATUS_LABELS[a.status] ?? a.status}</Badge>
+              {showWebsite && a.expand?.website?.name ? <span className="truncate">{a.expand.website.name}</span> : showClient && a.expand?.client?.business_name ? <span className="truncate">{a.expand.client.business_name}</span> : null}
+            </div>
+          </Link>
+        </li>
+      ))}
+    </ul>
+    <Card className="hidden sm:block">
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50"><tr>
@@ -70,6 +85,7 @@ export function ArticleTable({ articles, showClient = true, showWebsite = true }
         </table>
       </div>
     </Card>
+    </>
   );
 }
 

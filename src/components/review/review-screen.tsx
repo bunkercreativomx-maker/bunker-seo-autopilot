@@ -103,7 +103,7 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
   }
 
   return (
-    <div className="space-y-4 pb-32">
+    <div className="space-y-4 pb-44 sm:pb-32">
       {/* status */}
       <div className={cn("flex flex-wrap items-center gap-3 rounded-xl px-4 py-3 text-sm ring-1 ring-inset", tones[status.tone])}>
         {(working || checksPending || waitingImage || publishing) && <span className="h-2 w-2 animate-pulse rounded-full bg-current" />}
@@ -207,8 +207,8 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
 
       {/* one action bar */}
       {canEdit && post.status !== "rejected" && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 backdrop-blur lg:left-64">
-          <div className="mx-auto max-w-4xl space-y-2 px-4 py-3">
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 backdrop-blur md:left-64">
+          <div className="mx-auto max-w-4xl space-y-2 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3">
             {panel === "rewrite" && (
               <form action={rew.run} className="flex gap-2">
                 {hidden}
@@ -230,7 +230,7 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
                   {/* Modo Soro: pressing Publish is the human review — no extra checkbox. */}
                   <input type="hidden" name="reviewed" value="on" />
                   <button disabled={!canPublish || busy} title={!post.image ? "Waiting for the image" : checksPending ? "Checking the latest changes" : ""}
-                    className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">
+                    className="w-full rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold sm:w-auto sm:py-2 text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40">
                     {pub.pending ? "Publishing…" : post.status === "awaiting_approval" ? "Approve & publish" : "Publish"}
                   </button>
                 </>
