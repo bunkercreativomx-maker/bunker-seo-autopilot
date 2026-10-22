@@ -63,7 +63,7 @@ export default async function HubIndex({ params }: Props) {
                 <div className="bh-empty-ic" aria-hidden>{th.icon ?? "❄"}</div>
                 <h2>{L.empty}</h2>
                 <p>{th.ctaText}</p>
-                <a className="bh-btn bh-btn-accent" href={`tel:${tn}`}>{L.call} {s.phone}</a>
+                {tn ? <a className="bh-btn bh-btn-accent" href={`tel:${tn}`}>{L.call} {s.phone}</a> : <a className="bh-btn bh-btn-accent" href={th.book.href}>{th.book.label}</a>}
               </div>
             ) : (
               <div className="bh-grid">

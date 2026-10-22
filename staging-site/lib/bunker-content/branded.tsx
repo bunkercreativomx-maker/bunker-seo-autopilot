@@ -30,7 +30,7 @@ export function BrandedShell({ th, s, staging, children }: { th: HubTheme; s: Si
       {staging ? <div className="banner">{staging}</div> : null}
       <header className="bh-head">
         <div className="bh-bar">
-          <a className="bh-call" href={`tel:${t}`}><Phone /> <span>{th.phoneLabel}</span></a>
+          <a className="bh-call" href={t ? `tel:${t}` : th.book.href}>{t ? <Phone /> : null} <span>{th.phoneLabel}</span></a>
           <a className="bh-sched" href={th.schedule.href}><Cal /> <span>{th.schedule.label}</span></a>
         </div>
         <div className="bh-nav-wrap">
@@ -56,7 +56,7 @@ export function BrandedShell({ th, s, staging, children }: { th: HubTheme; s: Si
             <p>{th.ctaText}</p>
           </div>
           <div className="bh-cta-actions">
-            <a className="bh-btn bh-btn-accent" href={`tel:${t}`}><Phone /> {s.phone}</a>
+            {t ? <a className="bh-btn bh-btn-accent" href={`tel:${t}`}><Phone /> {s.phone}</a> : <a className="bh-btn bh-btn-accent" href={th.book.href}>{th.book.label}</a>}
             <a className="bh-btn bh-btn-hot" href={th.schedule.href}><Cal /> {th.schedule.label}</a>
           </div>
         </div>
@@ -71,7 +71,7 @@ export function BrandedShell({ th, s, staging, children }: { th: HubTheme; s: Si
           <div>
             <h3>{L.contact}</h3>
             <ul className="bh-contact">
-              <li><span className="bh-ic"><Phone /></span><a href={`tel:${t}`}>{s.phone}</a></li>
+              {t ? <li><span className="bh-ic"><Phone /></span><a href={`tel:${t}`}>{s.phone}</a></li> : null}
               {th.email ? <li><span className="bh-ic"><Mail /></span><a href={`mailto:${th.email}`}>{th.email}</a></li> : null}
               {th.area ? <li><span className="bh-ic"><Pin /></span><span>{th.area}</span></li> : null}
             </ul>
