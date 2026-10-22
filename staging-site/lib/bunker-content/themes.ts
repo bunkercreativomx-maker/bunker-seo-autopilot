@@ -24,6 +24,8 @@ export type HubTheme = {
   icon?: string;
   // Square logos need a smaller footer size; defaults to 250px.
   footLogoWidth?: string;
+  // Very wide logos: cap the header logo width (image keeps its aspect ratio).
+  logoMaxWidth?: string;
   footerBlurb: string;
   email?: string;
   area?: string;
@@ -38,6 +40,9 @@ export type HubTheme = {
 const EMPIRE = "https://weneedair.com";
 const TLALOC = "https://www.tlalocsolfuturo.com";
 const BC = "https://bunkercreativomx.com";
+const CAM = "https://creditoatumedida.com";
+const DP = "https://donpunto.com";
+const HUBA = "https://blog.bunkerank.com";
 
 const THEMES: Record<string, HubTheme> = {
   // Empire Refrigeration - weneedair.com
@@ -159,6 +164,82 @@ const THEMES: Record<string, HubTheme> = {
     ctaTitle: "¿Quieres que tu negocio se vea premium?",
     ctaText: "Cotiza tu página web, tus redes sociales o tu imprenta por WhatsApp y arrancamos esta semana.",
     author: "Bunker Creativo",
+    readMore: "Leer más",
+  },
+  // Créditos a tu Medida - creditoatumedida.com (crédito vía nómina, jubilados y pensionados, Cd. Juárez)
+  n35lrwj1jv35394: {
+    logo: `${HUBA}/themes/creditos-wordmark.png`,
+    logoAlt: "Créditos a tu medida - Crédito vía nómina para jubilados y pensionados",
+    colors: { primary: "#0a1628", accent: "#d4b84a", hot: "#1e3a66", bar: "#c9a227" },
+    nav: [
+      { label: "Créditos", href: `${CAM}/#creditos` },
+      { label: "Proceso", href: `${CAM}/#proceso` },
+      { label: "Requisitos", href: `${CAM}/#requisitos` },
+      { label: "Ubicación", href: `${CAM}/#ubicacion` },
+      { label: "Blog", href: `${CAM}/blog` },
+    ],
+    phoneLabel: "Llámanos: 656 374 8899",
+    schedule: { label: "Escríbenos por WhatsApp", href: "https://wa.me/526563748899" },
+    book: { label: "Escríbenos", href: "https://wa.me/526563748899" },
+    heroTitle: ["Guías de crédito", "para jubilados y pensionados"],
+    heroSub: "Crédito vía nómina explicado claro y sin letras chiquitas, por el equipo de Créditos a tu medida en Ciudad Juárez.",
+    heroImage: `${CAM}/fotos/hero-real.webp`,
+    heroBg: "linear-gradient(135deg,#060d1c 0%,#16294f 100%)",
+    heroOverlay: "linear-gradient(100deg, rgba(6,13,28,.94) 38%, rgba(15,32,56,.72))",
+    heroAccent: "#e3cd7f",
+    icon: "✦",
+    footLogoWidth: "190px",
+    footerBlurb: "Promotor de crédito vía nómina para jubilados y pensionados, en alianza con Financiera Fortaleza, S.A. de C.V., SOFOM, E.N.R.",
+    area: "Benjamin Franklin 3220, Int 22-D, Zona Pronaf, Ciudad Juárez, Chihuahua",
+    quickLinks: [
+      { label: "Inicio", href: `${CAM}/` },
+      { label: "Créditos", href: `${CAM}/#creditos` },
+      { label: "Proceso", href: `${CAM}/#proceso` },
+      { label: "Requisitos", href: `${CAM}/#requisitos` },
+      { label: "Ubicación", href: `${CAM}/#ubicacion` },
+      { label: "Blog", href: `${CAM}/blog` },
+    ],
+    ctaTitle: "¿Quieres saber cuánto te pueden prestar?",
+    ctaText: "Cada caso es distinto. Escríbenos por WhatsApp o llámanos al 656 374 8899 y un asesor revisa tu caso sin compromiso.",
+    author: "Equipo Créditos a tu medida",
+    readMore: "Leer más",
+  },
+
+  // Don Punto - donpunto.com (punto de venta para restaurantes en México)
+  "86ix1a1thvb52ew": {
+    logo: `${DP}/brand/logo-3d-compact.webp`,
+    logoAlt: "Don Punto - Punto de venta para restaurantes",
+    logoMaxWidth: "300px",
+    colors: { primary: "#0D100E", accent: "#16895F", hot: "#0E6F4D", bar: "#F5B323" },
+    nav: [
+      { label: "Inicio", href: `${DP}/` },
+      { label: "Cómo funciona", href: `${DP}/#como-funciona` },
+      { label: "Precios", href: `${DP}/#precios` },
+      { label: "Preguntas", href: `${DP}/#preguntas` },
+      { label: "Blog", href: `${DP}/blog` },
+    ],
+    phoneLabel: "Punto de venta para restaurantes en México",
+    schedule: { label: "Entrar", href: `${DP}/login` },
+    book: { label: "Crear cuenta", href: `${DP}/login` },
+    heroTitle: ["Guías para vender más", "en tu restaurante"],
+    heroSub: "Corte de caja, IVA, inventario y precios en Uber Eats, DiDi Food y Rappi, explicados por el equipo de Don Punto.",
+    heroBg: "linear-gradient(135deg,#0D100E 0%,#093A2C 100%)",
+    heroAccent: "#F5B323",
+    icon: "●",
+    footLogoWidth: "220px",
+    footerBlurb: "Punto de venta para restaurantes y negocios de comida. Funciona en el celular, la tablet o la compu que ya tienes.",
+    email: "soporte@donpunto.com",
+    area: "Todo México",
+    quickLinks: [
+      { label: "Inicio", href: `${DP}/` },
+      { label: "Precios", href: `${DP}/#precios` },
+      { label: "Blog", href: `${DP}/blog` },
+      { label: "Aviso de Privacidad", href: `${DP}/privacidad` },
+      { label: "Términos", href: `${DP}/terminos` },
+    ],
+    ctaTitle: "¿Listo para cuadrar tu caja sin batallar?",
+    ctaText: "Crea tu cuenta de Don Punto y empieza a cobrar desde el celular, la tablet o la compu que ya tienes.",
+    author: "Equipo Don Punto",
     readMore: "Leer más",
   },
 };

@@ -19,7 +19,7 @@ const Pin = () => (
 export const tel = (phone: string) => phone.replace(/[^\d+]/g, "");
 
 export function themeStyle(th: HubTheme): CSSProperties {
-  return { ["--b-primary" as string]: th.colors.primary, ["--b-accent" as string]: th.colors.accent, ["--b-hot" as string]: th.colors.hot, ["--b-bar" as string]: th.colors.bar, ["--b-hero-accent" as string]: th.heroAccent ?? th.colors.accent, ["--b-foot-logo" as string]: th.footLogoWidth };
+  return { ["--b-primary" as string]: th.colors.primary, ["--b-accent" as string]: th.colors.accent, ["--b-hot" as string]: th.colors.hot, ["--b-bar" as string]: th.colors.bar, ["--b-hero-accent" as string]: th.heroAccent ?? th.colors.accent, ["--b-foot-logo" as string]: th.footLogoWidth, ["--b-logo-max" as string]: th.logoMaxWidth };
 }
 
 export function BrandedShell({ th, s, staging, children }: { th: HubTheme; s: SiteProfile; staging?: string; children: ReactNode }) {

@@ -134,3 +134,5 @@ main:has(.hub){max-width:none;padding:0}
 @media (max-width:1560px){.bh-badge{display:none}}
 @media (max-width:1279px){.bh-badge{display:block;height:70px}.bh-nav-in>.bh-book{margin-left:auto}}
 @media (max-width:767px){.bh-badge{display:none}.bh-logo img{height:54px}}
+
+.bh-logo img{max-width:min(var(--b-logo-max,2000px),52vw);object-fit:contain;object-position:left center}
