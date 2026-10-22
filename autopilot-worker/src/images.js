@@ -49,16 +49,17 @@ Rules:
 - Never default to "a technician with a machine" unless the post is about repairing/installing equipment.
 - Money/credit/legal topics: show people and a warm conversation or the life goal the money enables, never piles of cash, bank logos or contracts with readable text.
 - Software/business topics: show the business moment the software helps with (customers, staff, counter, owner); screens only seen from the side or blurred.
-- Printing/signage/marketing topics: show the finished product in real use or the production process (large-format printer, a storefront) with blank or blurred graphics.
-- Avoid anything that needs readable text: no signs, labels, screens facing camera, or documents with visible writing.
+- Product posts (printing, signage, apparel, cards, stickers, banners, merchandise): the finished product must be the hero and instantly recognizable for what it is — e.g. a fanned stack of printed business cards with a colorful design, a large vinyl banner being hung on a storefront, DTF-printed t-shirts on a rack. Blank white cards or plain paper read as "nothing"; printed items should carry colors, shapes, logo-like marks or out-of-focus print, never legible words.
+- Avoid anything that needs readable text: no signs, labels, screens facing camera, or documents with visible writing. Out-of-focus or abstract print is fine.
 - If human_request is present, follow it.
 Answer in English.`;
 
 const DIRECTOR_SCHEMA = {
   type: "object", additionalProperties: false,
-  required: ["scene", "people", "setting", "light_mood", "framing"],
+  required: ["scene", "hero_object", "people", "setting", "light_mood", "framing"],
   properties: {
     scene: { type: "string", description: "One sentence: who is doing what, tied to the post topic." },
+    hero_object: { type: "string", description: "The ONE thing the viewer must recognize at first glance, described concretely (e.g. 'a fanned stack of thick business cards printed with a bold two-color design'), or 'none'." },
     people: { type: "string", description: "Age, look, clothing; or 'none'." },
     setting: { type: "string", description: "Concrete place, local to the business city/country." },
     light_mood: { type: "string" },
@@ -68,7 +69,8 @@ const DIRECTOR_SCHEMA = {
 
 const QA = `You check a blog featured photo before it goes live. Be strict.
 fits=false if the photo does not clearly relate to the post topic and audience (wrong subject, wrong kind of people, wrong country look).
-garbled_text=true if ANY letters, words, fake text, labels, signs, logos or numbers are visible (readable or pseudo-readable).
+garbled_text=true if readable or pseudo-readable letters, words, fake text, labels, signs, logos or numbers are visible. Out-of-focus, abstract or indistinct print on products is fine.
+fits=false also when the post is about a product (cards, banners, shirts, stickers, signs) and that product is not clearly recognizable in the photo (blank paper or generic samples do not count).
 artifacts=true for deformed hands/faces, melted objects, impossible machines, or an obviously fake CGI look.
 reason: one short sentence on what to fix.`;
 
@@ -89,11 +91,12 @@ export function photoPrompt(brief, ctx) {
   }
   return [
     `Candid documentary photograph, full-frame camera, 35mm lens. ${clean(brief.scene, 400)}`,
+    brief.hero_object && !/^none\.?$/i.test(brief.hero_object.trim()) ? `Main subject, large in frame and instantly recognizable: ${clean(brief.hero_object, 240)}.` : "",
     brief.people && !/^none\.?$/i.test(brief.people.trim()) ? `People: ${clean(brief.people, 240)}.` : "",
     `Setting: ${clean(brief.setting, 240)}.`,
     `Light and mood: ${clean(brief.light_mood, 160)}. Framing: ${clean(brief.framing, 160)}.`,
     "Natural skin texture, real-world imperfections, believable everyday details, not staged stock, not CGI.",
-    "Absolutely no text, letters, numbers, signs, labels, logos, brand names or watermarks anywhere; any screen or paper is blank or out of focus.",
+    "No legible text, letters, numbers, signs, labels, logos, brand names or watermarks anywhere; printed items may show colors, abstract graphics or out-of-focus print, never readable words; screens are blank or out of focus.",
   ].filter(Boolean).join(" ");
 }
 
