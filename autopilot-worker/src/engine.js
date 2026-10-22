@@ -118,7 +118,10 @@ export class Engine {
     const k = `img:${art.id}:v${art.current_version}:${req || this.ts().slice(0, 10)}`;
     if (await this.first("notifications", `organization = "${esc(run.organization)}" && dedupe_key = "${esc(k)}"`)) return;
     const w = art.website ? await this.one("websites", art.website).catch(() => null) : null;
-    const r = await this.images(art, { hint: String(art.provenance?.image_hint || ""), business: String(w?.name || "") });
+    const client = w?.client ? await this.one("clients", w.client).catch(() => null) : null;
+    // The sweep loads only a few fields; the art director needs the post body.
+    const full = art.content === undefined ? await this.one("articles", art.id).catch(() => art) : art;
+    const r = await this.images(full, { hint: String(art.provenance?.image_hint || ""), website: w, client });
     await this.col("notifications").create({ organization: run.organization, website: run.website || art.website, kind: "autopilot_image", severity: r.ok ? "info" : "warning", title: r.ok ? `Image added: ${art.title || ""}`.slice(0, 300) : `Image not generated (${r.code})`, body: "", link: `/review/${art.id}`, dedupe_key: k, occurrences: 1, read_at: this.ts(), created_at: this.ts(), updated_at: this.ts() }, { requestKey: null });
     if (!r.ok) return;
     const fresh = await this.one("articles", art.id);
