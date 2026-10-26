@@ -13,6 +13,8 @@ import { StrategyGenerateButton } from "@/components/strategy-generate-button";
 import { isAdmin } from "@/lib/pocketbase/auth";
 import type { TodaySite } from "@/lib/pocketbase/today";
 import { statusTone } from "@/components/ui";
+import { loadQuestions } from "@/lib/pocketbase/questions";
+import { QuickQuestions } from "@/components/questions/quick-questions";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +61,7 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
   const hasPlan = (stratVersions?.totalItems ?? 0) > 0;
   const activeStrategy = await pb.collection("strategy_jobs").getList(1, 1, { filter: `website = "${website.id}" && (status = "queued" || status = "running")`, requestKey: null }).catch(() => null);
   const planning = (activeStrategy?.totalItems ?? 0) > 0;
+  const questions = isAdmin(user.role) ? await loadQuestions(pb, website.id) : [];
   const factsRes = await pb.collection("business_facts").getList(1, 60, { filter: `website = "${website.id}"`, fields: "id,fact_type,label,value,source_url,verification_state,provenance", requestKey: null }).catch(() => null);
   const learned = (factsRes?.items ?? []) as unknown as Array<{ id: string; fact_type: string; label: string; value: string; source_url: string; verification_state: string; provenance: string }>;
   const langName: Record<string, string> = { es: "Spanish", en: "English", pt: "Portuguese", fr: "French" };
@@ -110,20 +113,27 @@ export default async function WebsiteOverviewPage({ params }: { params: Promise<
         </div>
       )}
 
+      {/* Quick questions: owner answers become facts posts may (or must never) use */}
+      {isAdmin(user.role) && <div id="questions"><QuickQuestions questions={questions} limit={12} showSite={false} /></div>}
+
       {/* What we learned from the site */}
       {learned.length > 0 && (
         <details className="rounded-2xl border border-slate-200 bg-white px-5 py-4">
           <summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-900">
-            What we learned from the site
+            What posts can say about the business
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{learned.length}</span>
             {lang && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700">Posts in {langName[lang] ?? lang}</span>}
           </summary>
           <ul className="mt-3 divide-y divide-slate-100">
             {learned.map((f) => (
               <li key={f.id} className="flex items-start gap-3 py-2 text-sm">
-                <span className="w-24 shrink-0 text-xs font-medium uppercase tracking-wide text-slate-400">{f.label || f.fact_type}</span>
-                <span className="min-w-0 flex-1 text-slate-800">{String(f.value).replace(/<[^>]*>/g, "")}</span>
-                {f.verification_state === "verified" || f.verification_state === "user_confirmed"
+                <span className="w-28 shrink-0 break-words pr-2 text-[11px] font-medium uppercase leading-snug tracking-wide text-slate-400 sm:w-40">{f.label || f.fact_type}</span>
+                <span className="min-w-0 flex-1 text-slate-800">{String(f.value).replace(/<[^>]*>/g, "").replace(/^NOT OFFERED:\s*/, "").replace(/\s*Never claim it\.?$/, "")}</span>
+                {/^NOT OFFERED/.test(String(f.value).replace(/<[^>]*>/g, ""))
+                  ? <span className="shrink-0 text-xs text-rose-600" title="The business doesn't offer this: posts will never claim it">✗ not offered</span>
+                  : f.verification_state === "user_confirmed"
+                  ? <span className="shrink-0 text-xs text-emerald-600">✓ you confirmed</span>
+                  : f.verification_state === "verified"
                   ? <span className="shrink-0 text-xs text-emerald-600">✓ on site</span>
                   : <span className="shrink-0 text-xs text-amber-600" title="Prices and promotions are never stated in posts until you confirm them">not used</span>}
                 {f.source_url && <a href={f.source_url} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-sky-700 hover:underline">source</a>}

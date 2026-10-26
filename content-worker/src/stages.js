@@ -6,6 +6,7 @@ import { callTask } from "./ai-provider.js";
 import { evidenceBlock } from "./context.js";
 import { safeText } from "./text.js";
 import { topicsIn } from "./checks.js";
+import { formatGuide } from "./formats.js";
 
 export const CONTENT_TYPES = ["blog_article", "service_page", "location_page", "guide", "comparison", "faq_page", "existing_page_optimization"];
 
@@ -138,6 +139,8 @@ export async function runBrief(ctx, context, research) {
 ${GUARD}
 ${EVIDENCE_RULES}
 Content type guidance: ${CONTENT_TYPE_GUIDE[context.meta.content_type]}
+${formatGuide(context.meta)}
+Plan required_sections in the order of this POST STRUCTURE.
 Rules:
 - business_facts may ONLY contain statements backed by a VERIFIED fact id (F*) or, for plain descriptions of what the business offers (no numbers, prices, promotions, warranties, financing, certifications, years), by the client's own website text (C*). Never anything else.
 - external_facts may ONLY contain statements backed by an external source id (S*).
@@ -189,6 +192,7 @@ ${GUARD}
 ${EVIDENCE_RULES}
 Content type guidance: ${CONTENT_TYPE_GUIDE[context.meta.content_type]}
 Rules: one H1 containing the primary keyword${context.meta.target_location ? ` and ${context.meta.target_location}` : ""}; H2/H3 sections that each serve a clear purpose for the reader; do not create headings solely to insert keywords; list supporting evidence ids per section (never AI inference I* ids as evidence); internal_link_ids from L* only; mark where CTAs go. Include FAQ entries only when they reflect real searcher questions and can be answered without unverified business facts. No sections about unverified business topics (financing, warranties, certifications, case studies, prices) and no "trust signals to request" or reference-list sections.
+${formatGuide(context.meta)}
 ${languageLine(context)}`,
     input: evidenceBlock(context, { include: ["verified_facts", "unverified_data", "crawler_evidence", "external_sources", "internal_link_candidates"], extra: { research, brief } }),
     schema: outlineSchema,
@@ -215,13 +219,14 @@ const draftSchema = obj({
 
 const TOPIC_FACT_TYPES = { warranty: ["warranty", "guarantee"], certification: ["certification", "credential"], financing: ["financing"], promotion: ["promotion", "price"] };
 function unverifiedTopicList(context) {
-  const verifiedTypes = new Set(context.verified_facts.map((f) => f.type));
+  const verifiedTypes = new Set(context.verified_facts.filter((f) => !String(f.value || "").startsWith("NOT OFFERED")).map((f) => f.type));
   // A verified service/product like "Crédito nuevo" makes its topic (financing) a verified topic.
   const valueTopics = new Set(context.verified_facts.filter((f) => !String(f.value || "").startsWith("NOT OFFERED")).flatMap((f) => topicsIn(`${f.label || ""} ${f.value || ""}`)));
   const banned = Object.entries(TOPIC_FACT_TYPES).filter(([topic, types]) => !types.some((t) => verifiedTypes.has(t)) && !valueTopics.has(topic)).map(([topic]) => topic);
   const hasYears = context.verified_facts.some((f) => /\b\d+\s*(años|anos|years)\b/i.test(String(f.value || "")) && !String(f.value || "").startsWith("NOT OFFERED"));
   if (!hasYears) banned.push("years in business / experience");
-  banned.push("project or installation counts / references / case studies / testimonials", "savings percentages");
+  const hasReview = context.verified_facts.some((f) => /review|reseña|resena|testimon/i.test(`${f.label || ""}`) && !String(f.value || "").startsWith("NOT OFFERED"));
+  banned.push(hasReview ? "project or installation counts / references / case studies / testimonials other than the verified F* customer reviews quoted verbatim" : "project or installation counts / references / case studies / testimonials", "savings percentages");
   return ` For this business the following topics are NOT verified and are forbidden in the copy: ${banned.join(", ")}.`;
 }
 
@@ -248,6 +253,9 @@ function writerRules(context) {
 - No keyword stuffing, generic filler, repetitive intros, or empty phrases. Natural, useful, specific.
 - Markdown only: start with "# " H1, then "##"/"###" sections. No HTML, no front matter, no images.
 - ${AUDIENCE_ANGLE}
+- NO HYPE: never call the business "the best", "#1", "leader", "unbeatable", "100% guaranteed" or similar unless an F* fact says exactly that; such sentences are deleted automatically. Persuade with clarity, empathy and the reader's benefit instead.
+- REVIEWS: a customer review/testimonial may appear ONLY if it is an F* fact, quoted verbatim in quotation marks with no added name, date, number or detail. Otherwise no testimonials at all.
+${formatGuide(context.meta)}
 ${voiceLine(context)}
 ${languageLine(context)}`;
 }

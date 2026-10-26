@@ -4,6 +4,7 @@ import { requireUser, canWrite } from "@/lib/pocketbase/auth";
 import { getArticleBundle } from "@/lib/pocketbase/content";
 import { getPublication } from "@/lib/pocketbase/publishing";
 import { ReviewScreen } from "@/components/review/review-screen";
+import { postFormatLabel } from "@/lib/post-formats";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
           jobStep: job ? job.step || job.status : "",
           failed: Boolean(lastFailed),
           issues,
+          structure: postFormatLabel((a as { brief?: unknown }).brief, (a as { provenance?: unknown }).provenance),
         }}
       />
     </div>

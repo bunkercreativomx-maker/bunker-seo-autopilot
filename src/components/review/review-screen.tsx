@@ -12,6 +12,7 @@ export type ReviewPost = {
   title: string; excerpt: string; metaDescription: string; content: string; image: string; keyword: string;
   score: number | null; qaStatus: string; qaSummary: string; factStatus: string; highRisk: boolean; version: number;
   publicUrl: string; jobStep: string; failed: boolean; issues: Array<{ text: string; status: string }>;
+  structure?: string;
 };
 
 type Act = (p: ReviewState, f: FormData) => Promise<ReviewState>;
@@ -110,6 +111,7 @@ export function ReviewScreen({ post, canEdit }: { post: ReviewPost; canEdit: boo
         <span className="font-medium">{status.text}</span>
         <span className="ml-auto flex flex-wrap gap-1.5 text-[11px]">
           {post.score !== null && <span className="rounded-full bg-white/70 px-2 py-0.5">Quality {post.score}/100</span>}
+          {post.structure && <span className="rounded-full bg-white/70 px-2 py-0.5" title="Persuasion structure the writer followed. It never adds facts.">Structure: {post.structure}</span>}
           {post.keyword && <span className="rounded-full bg-white/70 px-2 py-0.5">🔎 {post.keyword}</span>}
           {post.highRisk && <span className="rounded-full bg-white/70 px-2 py-0.5">Sensitive topic</span>}
           {post.publicUrl && post.status === "published" && <a href={post.publicUrl} target="_blank" rel="noreferrer" className="rounded-full bg-white px-2 py-0.5 font-medium underline">View live ↗</a>}

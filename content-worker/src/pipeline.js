@@ -21,6 +21,7 @@ import {
   runBrief, runClaimExtraction, runDraft, runFactCheck, runMetadata, runOutline, runQA, runResearchAnalysis, runRevision,
 } from "./stages.js";
 import { safeText, tokens } from "./text.js";
+import { hypeSentences, pickFormat } from "./formats.js";
 
 export const WORKER_VERSION = "bunker-seo-content/0.4.0";
 export const SOURCE_STRATEGY = "evidence-first-v1";
@@ -138,6 +139,14 @@ export async function processContentJob(pb, job, deps) {
     await progress("building_context");
     const pageTexts = await loadPageTexts(data, { fetcher, primaryKeyword: article.primary_keyword });
     let context = buildContext(data, { pageTexts });
+    // Post structure (AIDA / PAS / StoryBrand…) chosen by code from the topic; a saved brief keeps its format.
+    context.meta.post_format = article.brief?.post_format || pickFormat({ ...context.meta, title: article.title });
+    // No-hype filter (code, no AI): business-voice superlatives not backed by a verified fact are deleted.
+    const dehype = (markdown) => {
+      const brandTerms = [context.meta.business_name, String(context.meta.website_domain || "").split(".")[0]].filter(Boolean);
+      const hype = hypeSentences(markdown, { verifiedFacts: context.verified_facts, brandTerms });
+      return hype.length ? { markdown: scrubSentences(markdown, hype).markdown, removed: hype } : { markdown, removed: [] };
+    };
     if (article.content_type === "existing_page_optimization") {
       if (!context.existing_content) throw new PipelineStop("EXISTING_CONTENT_UNAVAILABLE", "Existing page content could not be retrieved; cannot propose a revision without the original.");
       if (!article.existing_content) article = await updateArticle(pb, article.id, { existing_content: context.existing_content });
@@ -220,6 +229,7 @@ export async function processContentJob(pb, job, deps) {
         await progress("building_brief");
         const brief = await runBrief(ctx, context, research);
         brief.content_type = article.content_type;
+        brief.post_format = context.meta.post_format;
         state.brief = true;
         await saveState({ brief, status: "brief_ready", secondary_keywords: brief.secondary_keywords });
         if (job.configuration?.pause_after_brief) {
@@ -239,13 +249,15 @@ export async function processContentJob(pb, job, deps) {
         await progress("writing_draft");
         await saveState({ status: "drafting" });
         const draft = await runDraft(ctx, context, research, article.brief, article.outline);
-        const cleaned = processLinks(draft.content_markdown, context, data.pages);
+        const dh = dehype(draft.content_markdown);
+        const cleaned = processLinks(dh.markdown, context, data.pages);
         const provenance = {
           generated_by: WORKER_VERSION, provider: provider.name, models: config.models, source_strategy: SOURCE_STRATEGY,
           source_strategy_version: data.opportunity?.strategy_version || data.planItem?.strategy_version || "",
           source_opportunity: article.content_opportunity || "", source_plan_item: article.content_plan_item || "",
           source_research: article.research || "", research_provider: researchProvider?.name || "none",
           generated_at: now(), content_job: job.id, auto_publish_allowed: false, writer_notes: safeText(draft.notes_for_editor, 1500),
+          post_format: context.meta.post_format, hype_removed: dh.removed.slice(0, 10),
         };
         const version = await createVersion(pb, article, { title: draft.title, content: cleaned.markdown }, { changeType: "ai_generation", reason: state.regenerated_by_job ? `Regenerated draft (Retry, job ${job.id}): verified facts + editorial policy; previous versions preserved` : "Initial AI draft", label: provider.name });
         state.draft_version = version;
@@ -261,7 +273,7 @@ export async function processContentJob(pb, job, deps) {
       await progress("revising");
       const lastQa = (await pb.collection("article_qa_reports").getList(1, 1, { filter: `article = "${esc(article.id)}"`, sort: "-created_at" })).items[0];
       const revised = await runRevision(ctx, context, { brief: article.brief, outline: article.outline, content: article.content, issues: lastQa?.issues || [], instruction: job.revision_instruction });
-      const cleaned = processLinks(revised.content_markdown, context, data.pages);
+      const cleaned = processLinks(dehype(revised.content_markdown).markdown, context, data.pages);
       const version = await createVersion(pb, article, { title: revised.title, content: cleaned.markdown }, { changeType: "ai_revision", reason: `Human instruction: ${safeText(job.revision_instruction, 1500)}`, userId: job.triggered_by, label: provider.name });
       await saveState({ title: safeText(revised.title, 300), content: cleaned.markdown, current_version: version, status: "qa" });
     }
@@ -417,7 +429,7 @@ export async function processContentJob(pb, job, deps) {
         ...claims.filter((c) => c.action === "remove" || c.action === "rewrite").map((c) => ({ severity: "claim", description: `${c.action.toUpperCase()}: "${c.claim}"`, fix: c.suggested_rewrite || "" })),
       ];
       const revised = await runRevision(ctx, context, { brief: article.brief, outline: article.outline, content, issues: required });
-      const cleaned = processLinks(revised.content_markdown, context, data.pages);
+      const cleaned = processLinks(dehype(revised.content_markdown).markdown, context, data.pages);
       const version = await createVersion(pb, article, { title: revised.title, content: cleaned.markdown }, { changeType: "ai_revision", reason: `Automatic revision cycle ${cycle}: ${verdict.reasons.join("; ").slice(0, 1500)}`, label: provider.name });
       await saveState({ title: safeText(revised.title, 300), content: cleaned.markdown, current_version: version, revision_cycles: (article.revision_cycles || 0) + 1, status: "needs_revision" });
     }

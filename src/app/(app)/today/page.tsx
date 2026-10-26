@@ -3,6 +3,8 @@ import { requireUser, isAdmin } from "@/lib/pocketbase/auth";
 import { loadToday } from "@/lib/pocketbase/today";
 import { ReadyCard, ScoreRing, SiteRow } from "@/components/today/today-cards";
 import { formatRelative } from "@/lib/format";
+import { loadQuestions } from "@/lib/pocketbase/questions";
+import { QuickQuestions } from "@/components/questions/quick-questions";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +18,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
   const { pb, user } = await requireUser();
   const t = await loadToday(pb);
   const canEdit = isAdmin(user.role);
+  const questions = canEdit ? await loadQuestions(pb) : [];
   const hour = new Date().getUTCHours() - 6;
   const hello = hour < 12 ? "Good morning" : hour < 19 ? "Good afternoon" : "Good evening";
   const first = (user.name || "").split(" ")[0];
@@ -43,6 +46,9 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
           </div>
         )}
       </section>
+
+      {/* Quick questions: a few taps → posts that are true AND more convincing */}
+      <QuickQuestions questions={questions} limit={2} />
 
       {/* 2. Being written */}
       {t.writing.length > 0 && (

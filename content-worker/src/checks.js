@@ -582,7 +582,8 @@ function sentencesOf(markdown) {
  *   that speaks for the business.
  */
 export function scanUnverifiedBusinessMentions(markdown, context) {
-  const verified = context.verified_facts || [];
+  // A "NOT OFFERED" override never makes its topic verified.
+  const verified = (context.verified_facts || []).filter((f) => !isNegativeFact(f));
   const unverified = (context.unverified_data || []).filter((u) => u.kind === "business_fact" || u.kind === "client_profile" || u.kind === "website_profile");
   const verifiedText = verified.map((f) => `${f.label} ${f.value}`).join(" ");
   const verifiedTopics = new Set([...verified.map((f) => FACT_TYPE_TOPIC[f.type]), ...topicsIn(verifiedText)].filter(Boolean));

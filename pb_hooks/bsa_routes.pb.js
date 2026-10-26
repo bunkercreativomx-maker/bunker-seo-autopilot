@@ -70,6 +70,17 @@ routerAdd("POST", "/api/bsa/strategy/record", (e) => {
   return lib.handle(e, (actor, body) => lib.updateStrategyRecord(actor, body));
 }, $apis.requireAuth("users"));
 
+// Quick questions: owner Yes/No answers become business facts.
+routerAdd("POST", "/api/bsa/facts/questions", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  return lib.handle(e, (actor, body) => require(`${__hooks}/bsa_facts.js`).listQuestions(actor, body));
+}, $apis.requireAuth("users"));
+
+routerAdd("POST", "/api/bsa/facts/answer", (e) => {
+  const lib = require(`${__hooks}/bsa_lib.js`);
+  return lib.handle(e, (actor, body) => require(`${__hooks}/bsa_facts.js`).answerQuestion(actor, body));
+}, $apis.requireAuth("users"));
+
 routerAdd("POST", "/api/bsa/organization", (e) => {
   const lib = require(`${__hooks}/bsa_lib.js`);
   return lib.handle(e, (actor, body) => lib.updateOrganization(actor, body));
