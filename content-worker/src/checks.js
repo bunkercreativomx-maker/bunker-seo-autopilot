@@ -61,27 +61,138 @@ export function topicsIn(text) {
 }
 
 const STOP = new Set(["para", "como", "este", "esta", "estos", "estas", "desde", "entre", "sobre", "segun", "cada", "todo", "toda", "todos", "todas", "tambien", "donde", "cuando", "puede", "pueden", "with", "from", "that", "this", "your", "their", "have", "will"]);
+const ALIASES = [[/\b(ia|ai)\b/gi, "inteligencia artificial"], [/\bapps?\b/gi, "aplicaciones"], [/\bpos\b/gi, "punto de venta"]];
 function stems(text) {
-  return new Set(tokens(text).filter((t) => t.length > 3 && !STOP.has(t) && !/^\d+$/.test(t)).map((t) => t.slice(0, 5)));
+  let t = String(text || "");
+  for (const [re, to] of ALIASES) t = t.replace(re, ` ${to} `);
+  return new Set(tokens(t).filter((t) => t.length > 3 && !STOP.has(t) && !/^\d+$/.test(t)).map((t) => t.slice(0, 5)));
 }
 
-/** Does verified fact `fact` specifically support business claim text? */
-export function factSupportsClaim(claimText, fact) {
-  if (!fact) return false;
+// Connector words that carry no product detail ("Don Punto TE PERMITE…",
+// "INCLUYE…"). Everything else in a business claim must come from a fact.
+const GENERIC_STEMS = new Set(["conti", "duran", "sigue", "segui", "momen", "luego", "despu", "after", "while", "durin", "atend", "brind", "proye", "traba", "permi", "puede", "pueda", "ofrec", "tiene", "tiene", "tenga", "inclu", "ayuda", "usar", "utili", "usarl", "cuent", "hacer", "hacen", "hace", "manej", "lleva", "llevar", "ademas", "mismo", "misma", "forma", "maner", "tambi", "parte", "sirve", "solo", "sola", "esto", "eso", "allows", "lets", "offer", "inclu", "helps", "using", "provi", "featu", "funci", "herra", "siste", "plata", "softw", "servi", "neces", "negoc", "clien", "usuar", "dueño", "duen", "tuyo", "ellos", "ellas", "nuestro", "nuest"]);
+// Negative overrides ("NOT OFFERED: …") are truth about what the business
+// does NOT do: they can contradict a claim, never support one.
+export function isNegativeFact(fact) {
+  return /\b(not offered|no ofrece|no ofrecido|no disponible|not available)\b/i.test(`${fact?.label || ""} ${fact?.value || ""}`);
+}
+
+/**
+ * Detail coverage: share of the claim's content words that appear in the
+ * fact text(s). A business claim may only restate (or MIX) what the facts
+ * say; any extra detail (files, steps, columns, offers) lowers coverage.
+ */
+export function detailCoverage(claimText, facts, { brandTerms = [] } = {}) {
+  const factStems = new Set();
+  for (const f of facts) for (const st of stems(`${f.label || ""} ${f.value || ""}`)) factStems.add(st);
+  const brand = new Set(brandTerms.flatMap((b) => [...stems(b)]));
+  const claim = [...stems(claimText)].filter((st) => !GENERIC_STEMS.has(st) && !brand.has(st));
+  if (!claim.length) return { ratio: 0, missing: [], total: 0 };
+  const missing = claim.filter((st) => !factStems.has(st));
+  return { ratio: (claim.length - missing.length) / claim.length, missing, total: claim.length };
+}
+export const MIN_DETAIL_COVERAGE = 0.7;
+export const DETAIL_ITEM_COVERAGE = 0.5;
+
+/** Does verified fact(s) `fact` specifically support business claim text? */
+export function factSupportsClaim(claimText, fact, { brandTerms = [], minCoverage = MIN_DETAIL_COVERAGE } = {}) {
+  const facts = (Array.isArray(fact) ? fact : [fact]).filter((f) => f && !isNegativeFact(f));
+  if (!facts.length) return false;
   const text = String(claimText || "");
-  const factText = `${fact.label || ""} ${fact.value || ""}`;
   const claimDigits = (text.match(/\d[\d\s.()+-]{6,}\d/g) || []).map((d) => d.replace(/\D/g, ""));
-  const factDigits = String(fact.value || "").replace(/\D/g, "");
-  if (["phone", "whatsapp"].includes(fact.type)) return claimDigits.some((d) => d.length >= 8 && factDigits.endsWith(d.slice(-8)));
-  if (fact.type === "email") return normalizeForMatch(text).includes(normalizeForMatch(fact.value));
-  // Any business topic in the claim must be the topic of this fact.
-  const factTopics = new Set([FACT_TYPE_TOPIC[fact.type], ...topicsIn(factText)].filter(Boolean));
+  if (facts.length === 1 && ["phone", "whatsapp"].includes(facts[0].type)) {
+    const factDigits = String(facts[0].value || "").replace(/\D/g, "");
+    return claimDigits.some((d) => d.length >= 8 && factDigits.endsWith(d.slice(-8)));
+  }
+  if (facts.length === 1 && facts[0].type === "email") return normalizeForMatch(text).includes(normalizeForMatch(facts[0].value));
+  const factText = facts.map((f) => `${f.label || ""} ${f.value || ""}`).join(" ");
+  // Any business topic in the claim must be the topic of these facts.
+  const factTopics = new Set([...facts.map((f) => FACT_TYPE_TOPIC[f.type]), ...topicsIn(factText)].filter(Boolean));
   if (topicsIn(text).some((t) => !factTopics.has(t))) return false;
-  // Numbers in the claim must appear in the fact.
+  // Numbers in the claim must appear in the facts.
   const nums = (text.match(/\d+(?:[.,]\d+)?/g) || []);
-  if (nums.some((n) => !String(fact.value || "").includes(n))) return false;
-  const factStems = stems(factText);
-  return [...stems(text)].some((s) => factStems.has(s));
+  if (nums.some((n) => !facts.some((f) => String(f.value || "").includes(n) || String(f.label || "").includes(n)))) return false;
+  const cov = detailCoverage(text, facts, { brandTerms });
+  if (!cov.total) return false;
+  // Detail items (short) tolerate ONE paraphrased word ("leer" vs "leídas").
+  if (minCoverage <= DETAIL_ITEM_COVERAGE && cov.total >= 2 && cov.missing.length <= 1) return true;
+  return cov.ratio >= minCoverage;
+}
+
+/**
+ * One concrete detail the fact checker extracted from a business sentence.
+ * Supported when the checker cited real evidence for it (a verified fact or
+ * the client's own website page) AND the code agrees: the detail shares
+ * wording with the evidence, every number in it appears in the evidence, and
+ * warranties / financing / promotions / certifications are backed by a
+ * verified fact (never by website text alone). Returns the cited ids or null.
+ */
+export function detailSupported(d, evidence, byRecord = new Map(), { brandTerms = [], factsOnly = false } = {}) {
+  const text = String(d?.detail || "");
+  const ids = [...new Set((d?.fact_ids || []).map((id) => (evidence.has(id) ? id : byRecord.get(id))).filter(Boolean))]
+    .filter((id) => { const ev = evidence.get(id); return ev && (ev.category === "verified_fact" ? !isNegativeFact(ev.item) : ev.category === "crawler" && !factsOnly); });
+  // A detail that is just a verified phone / email is fine whatever the checker cited.
+  const contactIds = [...evidence].filter(([, ev]) => ev.category === "verified_fact" && ["phone", "whatsapp", "email"].includes(ev.item?.type) && factSupportsClaim(text, ev.item)).map(([id]) => id);
+  if (contactIds.length) {
+    const rest = text.replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, " ").replace(/\+?\d[\d\s().-]{6,}\d/g, " ");
+    const left = detailCoverage(rest, [], { brandTerms }).total;
+    if (left <= 3) return contactIds;
+  }
+  if (!ids.length) return null;
+  const items = ids.map((id) => evidence.get(id));
+  const facts = items.filter((ev) => ev.category === "verified_fact").map((ev) => ev.item);
+  const asText = (ev) => ev.category === "verified_fact" ? `${ev.item.label || ""} ${ev.item.value || ""}` : `${ev.item.title || ""} ${ev.item.h1 || ""} ${(ev.item.headings || []).join(" ")} ${ev.item.meta_description || ""} ${ev.item.text || ""}`;
+  // Corpus for wording: cited evidence plus every verified fact (the checker
+  // sometimes cites F3 for something F5 states) — never other websites.
+  const allFacts = [...evidence.values()].filter((ev) => ev.category === "verified_fact" && !isNegativeFact(ev.item));
+  const corpus = [...items, ...allFacts].map(asText).join(" ");
+  const corpusDigits = corpus.replace(/\D/g, "");
+  for (const n of text.match(/\d[\d\s.,()+-]*\d|\d/g) || []) {
+    const digits = n.replace(/\D/g, "");
+    if (digits && !corpusDigits.includes(digits) && !corpus.includes(n.trim())) return null;
+  }
+  const topics = topicsIn(text);
+  if (topics.length) {
+    const verified = allFacts.map((ev) => ev.item);
+    const factTopics = new Set([...verified.map((f) => FACT_TYPE_TOPIC[f.type]), ...topicsIn(verified.map((f) => `${f.label || ""} ${f.value || ""}`).join(" "))].filter(Boolean));
+    if (topics.some((t) => !factTopics.has(t))) return null;
+  }
+  const fits = (t) => { const cov = detailCoverage(t, [{ label: "", value: corpus }], { brandTerms }); return !cov.total || cov.ratio >= 0.5 || cov.missing.length <= 1; };
+  if (!fits(text) && !(cleanDetail(text) && fits(cleanDetail(text)))) return null;
+  return ids;
+}
+
+/** Checker detail items sometimes carry labels: "Crédito nuevo (product)", "Origen: 100% mexicana". */
+export function cleanDetail(detail) {
+  return String(detail || "").replace(/\([^)]*\)/g, " ").replace(/^[\p{L} ]{2,25}:\s+/u, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The client's OWN website text (C*) may back a plain description of what the
+ * business offers ("imprimimos lonas para fachadas"), never numbers, prices,
+ * promotions, warranties, financing, certifications or years — those need F*.
+ */
+export function sitePageSupports(detail, pages, { brandTerms = [] } = {}) {
+  const text = String(detail || "");
+  if (/\d/.test(text) || topicsIn(text).length) return false;
+  const asFacts = pages.map((p) => ({ type: "website_page", label: `${p.title || ""} ${p.h1 || ""} ${(p.headings || []).join(" ")}`, value: `${p.meta_description || ""} ${p.text || ""}` }));
+  const cov = detailCoverage(text, asFacts, { brandTerms });
+  if (!cov.total) return false;
+  if (cov.total >= 2 && cov.missing.length <= 1) return true;
+  return cov.ratio >= 0.6;
+}
+
+/** A NOT OFFERED fact that the claim restates as something the business does. */
+export function contradictingFact(claimText, facts, { brandTerms = [] } = {}) {
+  const brand = new Set(brandTerms.flatMap((b) => [...stems(b)]));
+  for (const f of facts) {
+    if (!isNegativeFact(f)) continue;
+    const neg = stems(String(f.value || "").replace(/not offered:?/i, ""));
+    const claim = [...stems(claimText)].filter((st) => !GENERIC_STEMS.has(st) && !brand.has(st));
+    const hit = claim.filter((st) => neg.has(st)).length;
+    if (claim.length && hit >= 3 && hit / claim.length >= 0.6 && !/\b(no|sin|not|without|ningun\w*)\b/.test(normalizeForMatch(claimText))) return f;
+  }
+  return null;
 }
 
 // Promises of time, speed, scope or outcome are never covered by a generic service fact.
@@ -124,6 +235,20 @@ export function enforceClaim(claim, proposal, evidence, { brandTerms = [], ownDo
   let risk;
   let source = "";
   let sourceId = "";
+  // Claims the code does not classify as business (no "we", no brand name:
+  // "100% mexicana", "Oficina en Benjamín Franklin 3220…") still pass when the
+  // checker mapped EVERY detail to a verified fact and the code agrees.
+  const detailList = Array.isArray(proposal?.details) ? proposal.details.filter((d) => String(d?.detail || "").trim()) : [];
+  const factOnlyDetails = () => {
+    if (!detailList.length) return null;
+    const ids = [];
+    for (const d of detailList) {
+      const r = detailSupported(d, evidence, byRecord, { brandTerms, factsOnly: true });
+      if (!r) return null;
+      ids.push(...r);
+    }
+    return [...new Set(ids)];
+  };
   if (contradicted) {
     status = "CONTRADICTED";
     risk = "high";
@@ -138,11 +263,14 @@ export function enforceClaim(claim, proposal, evidence, { brandTerms = [], ownDo
     // Business claims: ONLY a verified business fact that specifically matches
     // the claim can back it. Client website (C*), client declarations and
     // unverified facts (U*) and external sources never verify the business.
-    let matching = known.filter((id) => evidence.get(id).category === "verified_fact" && factSupportsClaim(claim.claim, evidence.get(id).item));
+    const allFacts = [...evidence].filter(([, ev]) => ev.category === "verified_fact");
+    const negative = contradictingFact(claim.claim, allFacts.map(([, ev]) => ev.item), { brandTerms });
+    let matching = negative ? [] : known.filter((id) => evidence.get(id).category === "verified_fact" && factSupportsClaim(claim.claim, evidence.get(id).item, { brandTerms }));
     // The model often forgets to cite the fact. Contact details (phone / email /
     // WhatsApp) are checked deterministically against EVERY verified fact.
     if (!matching.length) {
       for (const [id, ev] of evidence) {
+        if (negative) break;
         if (ev.category === "verified_fact" && ["phone", "whatsapp", "email"].includes(ev.item?.type) && factSupportsClaim(claim.claim, ev.item)) { matching = [id]; break; }
       }
       if (matching.length && !known.includes(matching[0])) known.push(matching[0]);
@@ -151,9 +279,42 @@ export function enforceClaim(claim, proposal, evidence, { brandTerms = [], ownDo
     // fact matcher (topics + numbers + shared stems) decides, not the citation.
     if (!matching.length) {
       for (const [id, ev] of evidence) {
-        if (ev.category === "verified_fact" && !commitmentBeyondFact(claim.claim, ev.item) && factSupportsClaim(claim.claim, ev.item)) { matching = [id]; break; }
+        if (negative) break;
+        if (ev.category === "verified_fact" && !commitmentBeyondFact(claim.claim, ev.item) && factSupportsClaim(claim.claim, ev.item, { brandTerms })) { matching = [id]; break; }
       }
       if (matching.length && !known.includes(matching[0])) known.push(matching[0]);
+    }
+    // DETAILS: the checker lists every concrete product/service detail of the
+    // sentence; EACH one must be stated by a verified fact (code re-checks the
+    // words). One invented detail ("exporta 6 archivos") = the sentence fails.
+    const details = Array.isArray(proposal?.details) ? proposal.details.filter((d) => String(d?.detail || "").trim()) : [];
+    let detailFailure = null;
+    if (details.length && !negative && !isOwnSitePointer(claim.claim, ownDomain)) {
+      const serviceItems = allFacts.filter(([, ev]) => !isNegativeFact(ev.item)).map(([, ev]) => ev.item);
+      for (const d of details) {
+        const ok = detailSupported(d, evidence, byRecord, { brandTerms });
+        if (!ok) { detailFailure = d.detail; break; }
+      }
+      if (detailFailure) matching = [];
+      else if (!matching.length) {
+        matching = [...new Set(details.flatMap((d) => (d.fact_ids || []).map((id) => (evidence.has(id) ? id : byRecord.get(id))).filter((id) => ["verified_fact", "crawler"].includes(evidence.get(id)?.category))))].slice(0, 4);
+        for (const id of matching) if (!known.includes(id)) known.push(id);
+      }
+    }
+    // MIX: a sentence that combines several verified offerings ("cortes por
+    // método de pago e IVA separado") is fine when every detail is in SOME fact.
+    if (!matching.length && !negative && !detailFailure) {
+      const service = allFacts.filter(([, ev]) => !["phone", "whatsapp", "email"].includes(ev.item?.type) && !isNegativeFact(ev.item));
+      const items = service.map(([, ev]) => ev.item);
+      if (items.length) {
+        const fullText = { label: "", value: items.map((f) => `${f.label || ""} ${f.value || ""}`).join(" ") };
+        if (!commitmentBeyondFact(claim.claim, fullText) && factSupportsClaim(claim.claim, items, { brandTerms })) {
+          const ranked = service.map(([id, ev]) => [id, detailCoverage(claim.claim, [ev.item], { brandTerms }).ratio]).sort((a, b) => b[1] - a[1]);
+          matching = ranked.filter(([, r]) => r > 0).slice(0, 3).map(([id]) => id);
+          for (const id of matching) if (!known.includes(id)) known.push(id);
+          if (matching.length) notes.push("Verified by combining several business facts.");
+        }
+      }
     }
     // A pointer to the business's OWN website (home, service page, blog) is
     // a link, not a promise: it is true by construction when the URL is on the
@@ -161,19 +322,27 @@ export function enforceClaim(claim, proposal, evidence, { brandTerms = [], ownDo
     if (!matching.length && ownDomain && isOwnSitePointer(claim.claim, ownDomain)) {
       status = "VERIFIED"; risk = "low"; source = "own_website";
     }
-    if (status === "VERIFIED") {
+    if (negative) {
+      status = "CONTRADICTED"; risk = "high";
+      notes.push(`Contradicts a NOT OFFERED fact: ${String(negative.value || "").slice(0, 160)}`);
+    } else if (status === "VERIFIED") {
       notes.push("Link to the business's own website.");
     } else if (matching.length) {
       status = "VERIFIED";
       risk = "low";
-      sourceId = matching[0];
-      source = "verified_business_fact";
+      sourceId = matching.find((id) => evidence.get(id)?.category === "verified_fact") || matching[0];
+      source = evidence.get(sourceId)?.category === "crawler" ? "own_website_page" : "verified_business_fact";
     } else {
       status = "UNVERIFIED";
       risk = "high";
+      if (detailFailure) notes.push(`Detail not stated by any verified fact: "${String(detailFailure).slice(0, 160)}".`);
       if (categories.has("verified_fact")) notes.push("Cited verified fact does not specifically support this business claim.");
       if (categories.has("crawler") || categories.has("unverified") || categories.has("external")) notes.push("Business claim needs a matching VERIFIED business fact; client website, client declarations and external sources are not sufficient.");
     }
+  } else if (proposal?.verification_status === "VERIFIED" && factOnlyDetails()?.length) {
+    const ids = factOnlyDetails();
+    status = "VERIFIED"; risk = "low"; sourceId = ids[0]; source = "verified_business_fact";
+    for (const id of ids) if (!known.includes(id)) known.push(id);
   } else if (categories.has("external")) {
     status = "SUPPORTED";
     risk = highRiskTopic ? "medium" : "low";
