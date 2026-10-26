@@ -330,3 +330,18 @@ test("token refresh: re-auth before the superuser token expires (expired token l
   assert.equal(tokenNeedsRefresh("", { now }), true);
   assert.equal(tokenNeedsRefresh("garbage", { now }), true);
 });
+
+test("AI incomplete (max_output_tokens): retried with bigger budget + low reasoning, even with retries 0", async () => {
+  const seen = [];
+  const provider = { name: "fake", generateStructured: async (args) => {
+    seen.push({ max: args.maxOutputTokens, effort: args.reasoningEffort });
+    if (seen.length === 1) { const e = new Error("OpenAI response incomplete: max_output_tokens"); e.code = "AI_INCOMPLETE"; throw e; }
+    return { value: { ok: true }, usage: { inputTokens: 1, outputTokens: 1, estimatedCost: null } };
+  } };
+  const { ctx } = ctxWith(provider, { retries: 0 });
+  const v = await callTask(ctx, "qa", { instructions: "x", input: "y", schema: {}, validate: (x) => (x?.ok ? true : "no") });
+  assert.deepEqual(v, { ok: true });
+  assert.equal(seen.length, 2);
+  assert.equal(seen[0].max, 32000); assert.equal(seen[0].effort, "");
+  assert.equal(seen[1].max, 64000); assert.equal(seen[1].effort, "low");
+});

@@ -44,7 +44,7 @@ export class OpenAIProvider {
     this.pricing = pricing;
   }
 
-  async generateStructured({ model, instructions, input, schema, schemaName = "structured_response", signal }) {
+  async generateStructured({ model, instructions, input, schema, schemaName = "structured_response", signal, maxOutputTokens = 0, reasoningEffort = "" }) {
     if (!model || !schema || !instructions) throw new TypeError("model, instructions, and schema are required");
     let response;
     try {
@@ -57,6 +57,8 @@ export class OpenAIProvider {
           instructions,
           input: typeof input === "string" ? input : JSON.stringify(input),
           text: { format: { type: "json_schema", name: schemaName, strict: true, schema } },
+          ...(maxOutputTokens ? { max_output_tokens: maxOutputTokens } : {}),
+          ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
         }),
       });
     } catch (error) {
@@ -115,7 +117,11 @@ export async function callTask(ctx, task, { instructions, input, schema, validat
   const retries = config.retries;
   const limit = timeoutMs || config.timeoutMs;
   let lastError;
-  for (let attempt = 0; attempt <= retries; attempt++) {
+  // An answer cut off by the output limit is retried with a bigger budget and
+  // low reasoning effort, so the tokens go to the JSON instead of thinking.
+  const maxOutputTokens = Number(config.maxOutputTokens) || 32000;
+  for (let attempt = 0; attempt <= Math.max(retries, 1); attempt++) {
+    if (attempt > retries && lastError?.code !== "AI_INCOMPLETE") break;
     budget.assertCanCall(task);
     const controller = new AbortController();
     let rejectTimeout;
@@ -129,7 +135,7 @@ export async function callTask(ctx, task, { instructions, input, schema, validat
     let usage = null;
     try {
       const response = await Promise.race([
-        provider.generateStructured({ model, instructions, input, schema, schemaName: task, signal: controller.signal }),
+        provider.generateStructured({ model, instructions, input, schema, schemaName: task, signal: controller.signal, maxOutputTokens: lastError?.code === "AI_INCOMPLETE" ? maxOutputTokens * 2 : maxOutputTokens, reasoningEffort: lastError?.code === "AI_INCOMPLETE" ? "low" : "" }),
         timedOut,
       ]);
       usage = response?.usage || { inputTokens: 0, outputTokens: 0, estimatedCost: null };

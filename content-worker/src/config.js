@@ -76,6 +76,7 @@ export function loadContentConfig(env = process.env) {
     baseUrl: text(env.OPENAI_BASE_URL, "https://api.openai.com/v1").replace(/\/+$/, ""),
     models,
     retries: integer(env.AI_MAX_RETRIES, 1, { min: 0, max: HARD_LIMITS.retries, name: "AI_MAX_RETRIES" }),
+    maxOutputTokens: integer(env.AI_MAX_OUTPUT_TOKENS, 32000, { min: 1000, max: 128000, name: "AI_MAX_OUTPUT_TOKENS" }),
     timeoutMs: integer(env.AI_TIMEOUT_MS, 90_000, { min: 1_000, max: HARD_LIMITS.timeoutMs, name: "AI_TIMEOUT_MS" }),
     writerTimeoutMs: integer(env.WRITER_TIMEOUT_MS, 240_000, { min: 1_000, max: HARD_LIMITS.timeoutMs, name: "WRITER_TIMEOUT_MS" }),
     research: Object.freeze({

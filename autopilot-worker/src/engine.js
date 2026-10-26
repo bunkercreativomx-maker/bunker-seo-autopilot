@@ -9,7 +9,7 @@
 // publishing targets. Long waits (human approval) park the run; record hooks
 // enqueue triggers and the next worker tick resumes the same run.
 import { deriveSignals } from "./signals.js";
-import { decide, summarize, circuitGroup, localDate, verifiedTypesFrom } from "./decide.js";
+import { decide, summarize, circuitGroup, localDate, verifiedTypesFrom, autoPublishBlockers } from "./decide.js";
 import { classifyError, retryable } from "./signals.js";
 const TEMPORARY_BLOCKS = new Set(["BUDGET_LIMIT", "PLAN_NOT_DUE", "PLAN_LIMIT"]);
 // Failure codes produced by bugs that later releases fixed (e.g. the approve hook now sends
@@ -304,13 +304,17 @@ export class Engine {
     // A revision whose job died on a provider outage (no credits, 429, 5xx,
     // timeout) never touched the article: it must not use up the article's
     // automatic fix. Those are counted apart and retried (capped).
-    const providerOutage = (a) => a.status === "failed" && /429|credit_balance|insufficient_quota|rate.?limit|5\d\d|timeout|timed out|ECONN|fetch failed/i.test(`${a.error_message || ""} ${a.error_code || ""} ${JSON.stringify(a.result || {})}`);
+    const providerOutage = (a) => a.status === "failed" && /429|credit_balance|insufficient_quota|rate.?limit|5\d\d|timeout|timed out|ECONN|fetch failed|AI_INCOMPLETE|incomplete|max_output_tokens/i.test(`${a.error_message || ""} ${a.error_code || ""} ${JSON.stringify(a.result || {})}`);
     for (const a of managedActs) {
       if (a.action_type !== "REQUEST_REVISION" || ["skipped", "cancelled", "blocked", "planned"].includes(a.status)) continue;
       if (providerOutage(a)) revisionFailures[a.article] = (revisionFailures[a.article] || 0) + 1;
       else revisions[a.article] = (revisions[a.article] || 0) + 1;
     }
-    const arts = await this.all("articles", `website = "${wid}"`, { fields: "id,status,title,primary_keyword,recommended_url,content_opportunity,current_version,qa_status,qa_score,flags,risk_categories,fact_check_status,high_risk,featured_image,approved_by,approved_at,approved_version,approved_hash,updated_at,expand.approved_by.name", expand: "approved_by" });
+    const arts = await this.all("articles", `website = "${wid}"`, { fields: "id,status,title,primary_keyword,recommended_url,content_opportunity,current_version,qa_status,qa_score,flags,risk_categories,fact_check_status,high_risk,featured_image,approved_by,approved_at,approved_version,approved_hash,updated_at,pipeline_state,expand.approved_by.name", expand: "approved_by" });
+    // A job that died mid-pipeline leaves the article in "draft" with last_error
+    // and no running job: treat it as failed so the automatic retry picks it up.
+    const activeJobs = new Set((await this.all("content_jobs", `website = "${wid}" && (status = "queued" || status = "running")`, { fields: "article" })).map((j) => j.article));
+    for (const a of arts) if (a.status === "draft" && a.pipeline_state?.last_error && !activeJobs.has(a.id)) { a.status = "failed"; a.stalled_draft = true; }
     const pubs = await this.all("article_publications", `website = "${wid}"`, { fields: "id,article,status,public_url,article_version,published_at,updated,updated_at" });
     const pubBy = Object.fromEntries(pubs.map((p) => [p.article, p]));
     const outcomes = await this.all("autopilot_outcomes", `website = "${wid}"`, { fields: "article,changed_at", sort: "-changed_at" });
@@ -693,7 +697,6 @@ export class Engine {
     await this.approvalTasks(run, snapshot);
     if (ctx.usage && decisions.some((d) => d.block_code === "BUDGET_LIMIT")) {
       await this.audit(run, "AUTOPILOT_BUDGET_PAUSED", "autopilot_run", run.id, { blocked: decisions.filter((d) => d.block_code === "BUDGET_LIMIT").map((d) => d.reason) });
-      await this.task(run, { kind: "budget_limit", title: "Autopilot budget limit reached", body: decisions.find((d) => d.block_code === "BUDGET_LIMIT").reason, dedup_key: `budget:${this.ts().slice(0, 10)}`, link: `/websites/${run.website}/autopilot` });
     }
     return this.settle(run, { cycles, stopped, gsc: ctx.gsc, snapshot });
   }
@@ -707,6 +710,8 @@ export class Engine {
       const key = `approval:${art.id}:v${art.current_version}`;
       if (art.status === "awaiting_approval") {
         await this.ensureImage(run, art);
+        // Will be auto-published by the safe filter: don't ask the human for it.
+        if (snapshot.auto_publish_safe && !autoPublishBlockers({ ...(await this.one("articles", art.id)), managed: true }).length) continue;
         const t = await this.task(run, { kind: "article_approval", title: `Article ready for approval: ${art.title || art.primary_keyword}`, body: `Version ${art.current_version} passed the Phase 4 pipeline (fact check ${art.fact_check_status}, QA ${art.qa_status}${art.high_risk ? ", HIGH RISK" : ""}). Autopilot never approves content.${snapshot.publish_after_human_approval && !art.high_risk ? " After your approval Autopilot will publish this version to the configured staging target." : ""}`, dedup_key: key, run: run.id, link: `/review/${art.id}`, remindDays: snapshot.approval_reminder_days, severity: "info" });
         // Reminder after N days; stays waiting forever — never auto-approves.
         if (t.status === "open" && t.remind_at && Date.parse(String(t.remind_at).replace(" ", "T")) <= this.now()) {
