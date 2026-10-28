@@ -287,10 +287,18 @@ function stageCtx(value) {
   return ctxWith({ name: "fake", generateStructured: async () => ({ value, usage: { inputTokens: 1, outputTokens: 1, estimatedCost: null } }) }, { retries: 0 }).ctx;
 }
 
-test("brief schema: business facts must cite verified F* ids", async () => {
+test("brief schema: business facts keep F*/C* ids and drop the rest instead of failing", async () => {
   const ctx = buildContext(fixture());
   const base = { primary_keyword: "k", secondary_keywords: [], intent: "i", audience: "a", content_type: "blog_article", goal: "g", conversion_goal: "c", target_location: "", angle: "a", key_questions: [], required_sections: [], external_facts: [], internal_links: [], cta: "c", things_to_avoid: [], target_length: { min_words: 800, max_words: 1200, rationale: "r" } };
-  await assert.rejects(runBrief(stageCtx({ ...base, business_facts: [{ statement: "Garantía 25 años", evidence_id: "U3" }] }), ctx, {}), /verified F\* ids/);
+  const dropped = await runBrief(stageCtx({ ...base, business_facts: [{ statement: "Garantía 25 años", evidence_id: "U3" }], external_facts: [{ statement: "x", evidence_id: "S99" }], internal_links: [{ candidate_id: "L99", anchor_idea: "a", reason: "r" }] }), ctx, {});
+  assert.equal(dropped.business_facts.length, 0);
+  assert.equal(dropped.external_facts.length, 0);
+  assert.equal(dropped.internal_links.length, 0);
+  const siteId = ctx.crawler_evidence[0]?.id;
+  if (siteId) {
+    const site = await runBrief(stageCtx({ ...base, business_facts: [{ statement: "Instalación de paneles", evidence_id: siteId }] }), ctx, {});
+    assert.equal(site.business_facts.length, 1);
+  }
   const ok = await runBrief(stageCtx({ ...base, business_facts: [{ statement: "Financiamiento sin intereses", evidence_id: "F2" }] }), ctx, {});
   assert.equal(ok.business_facts.length, 1);
 });

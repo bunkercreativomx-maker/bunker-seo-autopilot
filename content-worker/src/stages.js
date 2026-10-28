@@ -134,6 +134,7 @@ export async function runBrief(ctx, context, research) {
   const verified = new Set(context.verified_facts.map((f) => f.id));
   const external = new Set(context.external_sources.map((s) => s.id));
   const linkIds = new Set(context.internal_link_candidates.map((c) => c.id));
+  const siteIds = new Set((context.crawler_evidence || []).map((c) => c.id));
   return callTask(ctx, "brief_generation", {
     instructions: `You are the CONTENT STRATEGIST. Produce a structured content brief. You do not write the article.
 ${GUARD}
@@ -158,9 +159,13 @@ ${languageLine(context)}`,
     schema: briefSchema,
     validate(v) {
       if (!isObj(v) || !CONTENT_TYPES.includes(v.content_type)) return "bad shape";
-      if (v.business_facts.some((f) => !verified.has(f.evidence_id))) return "business_facts must cite verified F* ids";
-      if (v.external_facts.some((f) => !external.has(f.evidence_id))) return "external_facts must cite S* ids";
-      if (v.internal_links.some((l) => !linkIds.has(l.candidate_id))) return "unknown internal link candidate";
+      // Drop (never fail on) entries citing ids outside their allowed set. The
+      // prompt allows F* and C* (client site) for business_facts; one stray id
+      // used to fail the whole generation. Claims are re-checked later anyway.
+      if (!arr(v.business_facts, 15) || !arr(v.external_facts, 15) || !arr(v.internal_links, 8)) return "bad shape";
+      v.business_facts = v.business_facts.filter((f) => f && (verified.has(f.evidence_id) || siteIds.has(f.evidence_id)));
+      v.external_facts = v.external_facts.filter((f) => f && external.has(f.evidence_id));
+      v.internal_links = v.internal_links.filter((l) => l && linkIds.has(l.candidate_id));
       if (!Number.isInteger(v.target_length?.min_words) || !Number.isInteger(v.target_length?.max_words)) return "bad target_length";
       return true;
     },
