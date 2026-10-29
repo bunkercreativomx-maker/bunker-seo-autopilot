@@ -57,3 +57,13 @@ test("a NOT OFFERED fact contradicts the claim and never supports it", () => {
   // naming the product next to the override is not a contradiction
   assert.equal(contradictingFact("Don Punto es un punto de venta en la nube para restaurantes.", facts, opts), null);
 });
+
+test("a positive verified fact that states the claim beats an overlapping NOT OFFERED fact", () => {
+  const real = [
+    { id: "F2", type: "service", label: "Service", value: "Corte de caja: efectivo, tarjeta y ventas de apps de comida a domicilio por separado (las ventas de apps se registran a mano en la caja)" },
+    { id: "F7", type: "other", label: "Integraciones con apps de delivery y Google", value: "NOT OFFERED: Don Punto NO está integrado con ninguna app de comida a domicilio ni con Google. No recibe pedidos de esas apps automáticamente, no sincroniza menús ni precios con ellas y no centraliza sus ventas." },
+  ];
+  assert.equal(contradictingFact("En Don Punto, las ventas de apps de comida a domicilio se capturan a mano en caja.", real, opts), null);
+  assert.equal(contradictingFact("En Don Punto las ventas de apps se capturan a mano en caja.", real, opts), null);
+  assert.ok(contradictingFact("Don Punto recibe pedidos de las apps de comida a domicilio automáticamente y sincroniza menús y precios.", real, opts));
+});

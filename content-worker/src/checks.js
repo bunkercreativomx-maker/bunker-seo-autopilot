@@ -190,7 +190,16 @@ export function contradictingFact(claimText, facts, { brandTerms = [] } = {}) {
     const neg = stems(String(f.value || "").replace(/not offered:?/i, ""));
     const claim = [...stems(claimText)].filter((st) => !GENERIC_STEMS.has(st) && !brand.has(st));
     const hit = claim.filter((st) => neg.has(st)).length;
-    if (claim.length && hit >= 3 && hit / claim.length >= 0.6 && !/\b(no|sin|not|without|ningun\w*)\b/.test(normalizeForMatch(claimText))) return f;
+    if (claim.length && hit >= 3 && hit / claim.length >= 0.6 && !/\b(no|sin|not|without|ningun\w*)\b/.test(normalizeForMatch(claimText))) {
+      // A positive verified fact that states the claim at least as closely wins
+      // ("las ventas de apps se registran a mano en la caja" vs "NO integrado con apps").
+      const positiveHit = Math.max(0, ...facts.filter((p) => !isNegativeFact(p)).map((p) => {
+        const ps = stems(`${p.label || ""} ${p.value || ""}`);
+        return claim.filter((st) => ps.has(st)).length;
+      }));
+      if (positiveHit >= hit) continue;
+      return f;
+    }
   }
   return null;
 }
