@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Always render <title>/<meta> in <head> (no streamed metadata in <body>): SEO crawlers
+  // and social previews that are not on Next's bot list saw pages with "missing title".
+  htmlLimitedBots: /.*/,
   // When served through <client>.com/blog (Vercel rewrite), /_next assets must
   // load from the hub itself, not from the client's domain.
   assetPrefix: process.env.BUNKER_ASSET_PREFIX || (process.env.VERCEL_ENV === "production" && !process.env.BUNKER_WEBSITE_ID ? "https://blog.bunkerank.com" : undefined),
