@@ -69,7 +69,7 @@ export default async function HubIndex({ params }: Props) {
               <div className="bh-grid">
                 {posts.map((p) => (
                   <a key={p.slug} className="bh-card" href={publicUrl(s, p.slug)}>
-                    <div className="bh-card-img">{p.featured_image ? <img src={p.featured_image} alt="" loading="lazy" /> : <div className="bh-ph" aria-hidden>{th.icon ?? "❄"}</div>}</div>
+                    <div className="bh-card-img">{p.featured_image ? <img src={p.featured_image} alt={p.title} loading="lazy" /> : <div className="bh-ph" aria-hidden>{th.icon ?? "❄"}</div>}</div>
                     <div className="bh-card-body">
                       <div className="bh-meta"><span>{fmt(p.published_at)}</span><span>{th.author}</span></div>
                       <h2>{p.title}</h2>
@@ -96,7 +96,7 @@ export default async function HubIndex({ params }: Props) {
       <div className="hub-grid">
         {posts.map((p) => (
           <a key={p.slug} className="hub-card" href={publicUrl(s, p.slug)}>
-            {p.featured_image ? <img src={p.featured_image} alt="" loading="lazy" /> : <div className="hub-ph" aria-hidden />}
+            {p.featured_image ? <img src={p.featured_image} alt={p.title} loading="lazy" /> : <div className="hub-ph" aria-hidden />}
             <div className="hub-card-body">
               <h2>{p.title}</h2>
               {p.excerpt ? <p>{p.excerpt}</p> : null}

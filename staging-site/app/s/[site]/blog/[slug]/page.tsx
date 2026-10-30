@@ -35,7 +35,7 @@ export default async function HubArticle({ params }: Props) {
         <time dateTime={a.published_at}>{new Date(a.published_at).toLocaleDateString(loc, { day: "numeric", month: "long", year: "numeric" })}</time>
         {a.updated_at && a.updated_at.slice(0, 10) !== a.published_at.slice(0, 10) ? <> · {t(s.language).updated} <time dateTime={a.updated_at}>{new Date(a.updated_at).toLocaleDateString(loc)}</time></> : null}
       </p>
-      {a.featured_image ? <img className="hub-hero-img" src={a.featured_image} alt="" /> : null}
+      {a.featured_image ? <img className="hub-hero-img" src={a.featured_image} alt={a.title} /> : null}
       <div className="hub-prose"><Markdown source={a.content} /></div>
       <aside className="hub-box">
         <strong>{s.name}</strong>

@@ -30,7 +30,7 @@ export default async function ArticlePage({ params }: Props) {
         {a.updated_at && a.updated_at !== a.published_at ? <> · Actualizado <time dateTime={a.updated_at}>{new Date(a.updated_at).toLocaleDateString("es-MX")}</time></> : null}
         {a.author_public_name ? <> · {a.author_public_name}</> : null}
       </p>
-      {a.featured_image ? <img src={a.featured_image} alt="" style={{ maxWidth: "100%", borderRadius: 12 }} /> : null}
+      {a.featured_image ? <img src={a.featured_image} alt={a.title} style={{ maxWidth: "100%", borderRadius: 12 }} /> : null}
       <Markdown source={a.content} />
     </article>
   );
