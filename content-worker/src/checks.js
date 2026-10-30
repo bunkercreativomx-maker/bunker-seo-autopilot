@@ -396,11 +396,18 @@ export function enforceClaim(claim, proposal, evidence, { brandTerms = [], ownDo
 
 const HARD_TOPICS = new Set(["statistic", "medical", "price", "promotion", "guarantee", "warranty", "certification", "credential"]);
 /** A non-business claim that would be a factual risk if wrong (numbers, stats, medical, prices…). */
+// A real statistic carries a number or a quantity word. The model often labels
+// plain safety advice ("faulty wiring can cause a fire") as "statistic"; without
+// any quantity that is general knowledge, not a hard specific.
+const QUANTITY_WORDS = /%|\b(mayor[ií]a|minor[ií]a|mitad|tercio|doble|triple|veces|promedio|majority|most|half|twice|times|average|percent|por ?ciento)\b/i;
 export function isHardSpecific(claim) {
   if (!claim) return false;
-  if (/\d/.test(String(claim.claim || ""))) return true;
-  if (claim.claim_type === "statistic" || claim.claim_type === "medical") return true;
-  return HARD_TOPICS.has(claim.sensitive_topic || "none");
+  const text = String(claim.claim || "");
+  if (/\d/.test(text)) return true;
+  if (claim.claim_type === "medical") return true;
+  const topic = claim.sensitive_topic || "none";
+  if (claim.claim_type === "statistic" || topic === "statistic") return QUANTITY_WORDS.test(text) || (topic !== "statistic" && HARD_TOPICS.has(topic));
+  return HARD_TOPICS.has(topic);
 }
 
 const STABLE_KNOWLEDGE_TYPES = new Set(["general", "product", "external"]);

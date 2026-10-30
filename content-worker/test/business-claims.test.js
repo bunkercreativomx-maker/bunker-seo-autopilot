@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildContext, evidenceIndex } from "../src/context.js";
-import { scrubSentences, localDifferentiation, enforceClaim, factSupportsClaim, isBusinessClaim, isNonClaimText, isOwnSitePointer, scanUnverifiedBusinessMentions } from "../src/checks.js";
+import { isHardSpecific, scrubSentences, localDifferentiation, enforceClaim, factSupportsClaim, isBusinessClaim, isNonClaimText, isOwnSitePointer, scanUnverifiedBusinessMentions } from "../src/checks.js";
 
 const T = { organization: "org1", client: "cliA", website: "webA" };
 function data() {
@@ -189,4 +189,13 @@ test("Modo Soro: a list item the flagged claim paraphrases is removed too", () =
   const r = scrubSentences(md, ["Para preparar una propuesta normalmente se solicita consumos estimados futuros si se esperan cambios (nuevos equipos, ampliaciones, etc.)."]);
   assert.equal(r.removed.length, 1);
   assert.match(r.markdown, /Dirección del inmueble/);
+});
+
+test("plain safety advice the model labels 'statistic' is not a hard specific; real quantities still are", () => {
+  assert.equal(isHardSpecific({ claim: "Cableado y protecciones insuficientes en AC/DC generan riesgo de sobrecalentamiento o incendio.", claim_type: "statistic", sensitive_topic: "statistic" }), false);
+  assert.equal(isHardSpecific({ claim: "Faulty wiring can cause a fire.", claim_type: "statistic" }), false);
+  assert.equal(isHardSpecific({ claim: "La mayoría de los techos soportan paneles.", claim_type: "statistic" }), true);
+  assert.equal(isHardSpecific({ claim: "Panels save 40% on the bill.", claim_type: "statistic" }), true);
+  assert.equal(isHardSpecific({ claim: "This warranty covers labor.", claim_type: "general", sensitive_topic: "warranty" }), true);
+  assert.equal(isHardSpecific({ claim: "Consult a doctor.", claim_type: "medical" }), true);
 });
