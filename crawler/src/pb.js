@@ -15,6 +15,21 @@ export async function authWorker(pb, { adminEmail, adminPassword }) {
   return pb;
 }
 
+// PocketBase superuser tokens expire (~1 day). An expired token does NOT error on list
+// calls: the request is anonymous and `status = "queued"` returns 0 items, so the worker
+// idles "healthy" while the queue stalls. Re-auth before the token expires.
+export function tokenNeedsRefresh(token, { now = Date.now(), marginMs = 60 * 60_000 } = {}) {
+  try {
+    const part = String(token || "").split(".")[1];
+    if (!part) return true;
+    const payload = JSON.parse(Buffer.from(part.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
+    if (!payload || typeof payload.exp !== "number") return true;
+    return payload.exp * 1000 - now < marginMs;
+  } catch {
+    return true;
+  }
+}
+
 /** Claim the next queued crawl job, atomically-ish, and mark it running. */
 export async function claimNextJob(pb) {
   const jobs = await pb.collection("crawl_jobs").getList(1, 20, {

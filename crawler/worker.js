@@ -8,7 +8,7 @@
 //   PB_URL, PB_ADMIN_EMAIL, PB_ADMIN_PASSWORD
 //   POLL_INTERVAL_MS (default 3000), MAX_PAGES, CONCURRENCY
 import { runCrawl } from "./src/crawler.js";
-import { createWorkerClient, authWorker, claimNextJob, resolveJobContext, getExistingPages, getExistingIssues, upsertPage, persistLinks, createSnapshot, updateJobProgress } from "./src/pb.js";
+import { createWorkerClient, authWorker, tokenNeedsRefresh, claimNextJob, resolveJobContext, getExistingPages, getExistingIssues, upsertPage, persistLinks, createSnapshot, updateJobProgress } from "./src/pb.js";
 import { normalizeUrl } from "./src/normalize.js";
 import { pageIssues } from "./src/issues.js";
 import { applyAutoSetup } from "./src/autosetup.js";
@@ -280,6 +280,10 @@ async function init() {
   }
   while (!terminating) {
     try {
+      if (tokenNeedsRefresh(client.authStore.token)) {
+        await authWorker(client, { adminEmail: PB_ADMIN_EMAIL, adminPassword: PB_ADMIN_PASSWORD });
+        console.log("[worker] re-authenticated (token refresh)");
+      }
       const job = await claimNextJob(client);
       if (job) await processJob(job);
     } catch (e) {
