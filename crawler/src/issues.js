@@ -110,8 +110,17 @@ export function crossPageIssues({ pages, links, sitemapUrls }) {
   const byMeta = new Map();
   const internalDestinations = new Set();
 
-  // normalize: only indexable HTML pages matter for on-page checks
+  // normalize: only indexable HTML pages matter for on-page checks.
+  // A page whose canonical points to ANOTHER URL (e.g. an SPA route like /login serving the
+  // home HTML with canonical "/") is consolidated by search engines, so it is not a duplicate.
+  const canonKey = (u) => {
+    try { const x = new URL(u); return (x.host.toLowerCase().replace(/^www\./, "") + x.pathname.replace(/\/+$/, "")).toLowerCase(); } catch { return null; }
+  };
   for (const p of pages) {
+    if (p.canonical_url && p.url) {
+      const c = canonKey(p.canonical_url), u = canonKey(p.url);
+      if (c && u && c !== u) continue;
+    }
     if (p.title) {
       const key = p.title.toLowerCase().trim();
       if (!byTitle.has(key)) byTitle.set(key, []);

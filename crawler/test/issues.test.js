@@ -80,3 +80,21 @@ test("crossPageIssues: orphan detection", () => {
   });
   assert.ok(result.some((i) => i.issue_type === "potential_orphan_page"));
 });
+test("crossPageIssues: page canonicalized to another URL is not a duplicate", () => {
+  const result = crossPageIssues({
+    pages: [
+      { url: "https://x.com/", title: "Home", meta_description: "Same meta", canonical_url: "https://x.com/" },
+      { url: "https://x.com/login", title: "Home", meta_description: "Same meta", canonical_url: "https://x.com/" },
+    ],
+    links: [], sitemapUrls: [],
+  });
+  assert.equal(result.filter((i) => i.issue_type.startsWith("duplicate_")).length, 0);
+  const dup = crossPageIssues({
+    pages: [
+      { url: "https://x.com/a", title: "Same", canonical_url: "https://x.com/a" },
+      { url: "https://x.com/b/", title: "Same", canonical_url: "https://x.com/b" },
+    ],
+    links: [], sitemapUrls: [],
+  });
+  assert.equal(dup.filter((i) => i.issue_type === "duplicate_title").length, 1);
+});
