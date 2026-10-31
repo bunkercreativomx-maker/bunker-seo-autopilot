@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.env*
+staging-site
+analytics-worker
+autopilot-worker
+content-worker
+crawler
+publisher-worker
+strategy-worker
+docs
+scripts
+pb_hooks
+**/node_modules
+*.log

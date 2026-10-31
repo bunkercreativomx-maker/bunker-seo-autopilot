@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Coolify (Docker) construye con NEXT_OUTPUT=standalone; Vercel no lo usa.
+  ...(process.env.NEXT_OUTPUT === "standalone" ? { output: "standalone" as const } : {}),
   // Always render <title>/<meta> in <head> (no streamed metadata in <body>): SEO crawlers
   // and social previews that are not on Next's bot list saw pages with "missing title".
   htmlLimitedBots: /.*/,
