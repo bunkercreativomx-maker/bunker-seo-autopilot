@@ -189,7 +189,7 @@ const THEMES: Record<string, HubTheme> = {
     heroAccent: "#e3cd7f",
     icon: "✦",
     footLogoWidth: "190px",
-    footerBlurb: "Promotor de crédito vía nómina para jubilados y pensionados, en alianza con Financiera Fortaleza, S.A. de C.V., SOFOM, E.N.R.",
+    footerBlurb: "Promotor de crédito vía nómina para jubilados y pensionados.",
     area: "Benjamin Franklin 3220, Int 22-D, Zona Pronaf, Ciudad Juárez, Chihuahua",
     quickLinks: [
       { label: "Inicio", href: `${CAM}/` },
