@@ -189,7 +189,7 @@ const THEMES: Record<string, HubTheme> = {
     heroAccent: "#e3cd7f",
     icon: "✦",
     footLogoWidth: "190px",
-    footerBlurb: "Promotor de crédito vía nómina para jubilados y pensionados.",
+    footerBlurb: "Asesor independiente de crédito vía nómina para jubilados y pensionados. No otorgamos créditos ni cobramos por la asesoría; el crédito lo otorga una entidad financiera, sujeto a su aprobación.",
     area: "Benjamin Franklin 3220, Int 22-D, Zona Pronaf, Ciudad Juárez, Chihuahua",
     quickLinks: [
       { label: "Inicio", href: `${CAM}/` },
